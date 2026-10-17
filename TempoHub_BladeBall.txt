@@ -312,9 +312,18 @@ end
 -- ============================================================
 -- BALL
 -- ============================================================
-local BallsFolder = Workspace:WaitForChild("Balls", 30)
+-- non-blocking: do not stall UI build waiting for Balls
+local BallsFolder = Workspace:FindFirstChild("Balls")
+task.spawn(function()
+    if not BallsFolder then
+        BallsFolder = Workspace:WaitForChild("Balls", 60)
+    end
+end)
 
 local function getRealBall()
+    if not BallsFolder then
+        BallsFolder = Workspace:FindFirstChild("Balls")
+    end
     if not BallsFolder then return nil end
     for _, b in ipairs(BallsFolder:GetChildren()) do
         if b:IsA("BasePart") and b:GetAttribute("realBall") == true then
@@ -791,15 +800,18 @@ local function attachBall(ball)
     end
 end
 
-if BallsFolder then
-    track(BallsFolder.ChildAdded:Connect(function(child)
+task.spawn(function()
+    local folder = BallsFolder or Workspace:WaitForChild("Balls", 60)
+    if not folder then return end
+    BallsFolder = folder
+    track(folder.ChildAdded:Connect(function(child)
         if child:IsA("BasePart") and child:GetAttribute("realBall") == true then
             attachBall(child)
         end
     end))
     local existing = getRealBall()
     if existing then attachBall(existing) end
-end
+end)
 
 -- ============================================================
 -- UNLOCKS
@@ -1593,13 +1605,14 @@ end
 
 -- ============================================================
 -- UI — TEMPO TABS (same names as LexBlade)
+-- Win:Tab only takes the name. Icon is auto-matched.
 -- ============================================================
-local TabParry    = UI:Tab("Auto Parry", "swords")
-local TabVisuals  = UI:Tab("Visuals", "eye")
-local TabSocial   = UI:Tab("Social", "users")
-local TabUnlocks  = UI:Tab("Unlocks", "lock-open")
-local TabMovement = UI:Tab("Movement", "footprints")
-local TabMisc     = UI:Tab("Misc", "settings")
+local TabParry    = UI:Tab("Auto Parry")
+local TabVisuals  = UI:Tab("Visuals")
+local TabSocial   = UI:Tab("Social")
+local TabUnlocks  = UI:Tab("Unlocks")
+local TabMovement = UI:Tab("Movement")
+local TabMisc     = UI:Tab("Misc")
 
 -- -------------------- AUTO PARRY --------------------
 TabParry:Section("Auto Parry")
@@ -1826,9 +1839,7 @@ task.spawn(function()
         end
         local text = (#lines == 0) and "No users detected." or table.concat(lines, "\n")
         pcall(function()
-            if detectedLabel and detectedLabel.Set then
-                detectedLabel:Set(text)
-            elseif detectedLabel then
+            if detectedLabel then
                 detectedLabel.Text = text
             end
         end)
@@ -1884,7 +1895,7 @@ local function refreshSwordList()
     if #filtered == 0 then
         unlockState.sword = "(no swords match)"
         if swordDropdown and swordDropdown.SetItems then
-            pcall(function() swordDropdown:SetItems({ "(no swords match)" }) end)
+            pcall(function() swordDropdown.SetItems({ "(no swords match)" }) end)
         end
         return
     end
@@ -1898,9 +1909,7 @@ local function refreshSwordList()
     end
     unlockState.sword = display[1]
     if swordDropdown and swordDropdown.SetItems then
-        pcall(function() swordDropdown:SetItems(display, display[1]) end)
-    elseif swordDropdown and swordDropdown.Refresh then
-        pcall(function() swordDropdown:Refresh(display) end)
+        pcall(function() swordDropdown.SetItems(display, display[1]) end)
     end
 end
 
@@ -2091,5 +2100,13 @@ end
 startMainLoop()
 
 UI:Boot({ "checking executor", "building interface", "ready" }, function()
+    -- force first tab open so content is built immediately
+    pcall(function()
+        if UI.Select then
+            UI:Select("Auto Parry")
+        elseif UI._selectEntry and UI.rail and UI.rail[1] then
+            UI:_selectEntry(UI.rail[1])
+        end
+    end)
     UI:Notify("TempoHub loaded — " .. VERSION, "good")
 end)
