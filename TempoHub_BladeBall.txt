@@ -1,10 +1,3 @@
--- ============================================================
--- TEMPO HUB — Blade Ball
--- Fully rewritten from LexBlade onto TeekUI / TempoUI
--- All WindUI removed. Same tabs. Same features. Renamed.
--- Version 0.2.0259
--- ============================================================
-
 local env = (type(getgenv) == "function" and getgenv()) or _G
 if env.__TEMPOHUB_LOADED then
     local cleanup = env.__TEMPOHUB_CLEANUP
@@ -16,7 +9,7 @@ local Players            = game:GetService("Players")
 local RunService         = game:GetService("RunService")
 local UserInputService   = game:GetService("UserInputService")
 local VirtualUser        = game:GetService("VirtualUser")
-local VirtualInputManager= game:GetService("VirtualInputManager")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 local Lighting           = game:GetService("Lighting")
 local Workspace          = game:GetService("Workspace")
 local Stats              = game:GetService("Stats")
@@ -43,9 +36,6 @@ local function safeCall(label, fn)
     return ok
 end
 
--- ============================================================
--- FILE SYSTEM
--- ============================================================
 local FS = {
     available  = type(writefile) == "function" and type(readfile) == "function",
     baseFolder = "TempoHub",
@@ -82,9 +72,6 @@ local function readFS(path)
     return nil
 end
 
--- ============================================================
--- CONFIG
--- ============================================================
 local CFG = {
     autoParry              = false,
     parryMethod            = "Dual",
@@ -99,7 +86,6 @@ local CFG = {
     windowMin              = 0.16,
     windowPingFac          = 1.05,
     useFpsComp             = true,
-    autoFps                = false,
     fpsCompFactor          = 0.03,
     fpsCompMax             = 0.12,
     fpsOverride            = 0,
@@ -144,9 +130,6 @@ do
     end
 end
 
--- ============================================================
--- CONSTANTS
--- ============================================================
 local CAMERA_BIND     = "TempoHubCameraCurve"
 local CLASH_MODES     = { Legit = 0.20, Pro = 0.15, Master = 0.10, Machine = 0.06 }
 local CLASH_HISTORY   = 1.5
@@ -173,17 +156,6 @@ local PING_TIERS = {
     { maxPing = 9999, base = 0.48, speedFac = 0.00080, max = 0.65, min = 0.22, pingFac = 1.15 },
 }
 
-local FPS_TIERS = {
-    { minFps = 144, factor = 0.015, cap = 0.08 },
-    { minFps = 120, factor = 0.020, cap = 0.09 },
-    { minFps = 90,  factor = 0.025, cap = 0.10 },
-    { minFps = 60,  factor = 0.030, cap = 0.12 },
-    { minFps = 45,  factor = 0.040, cap = 0.14 },
-    { minFps = 30,  factor = 0.055, cap = 0.16 },
-    { minFps = 20,  factor = 0.070, cap = 0.18 },
-    { minFps = 0,   factor = 0.090, cap = 0.20 },
-}
-
 local ABILITY_DANGER = {
     "singularity", "rapture", "death slash", "deathslash", "slashes of fury",
     "slash of fury", "dribble", "gale", "gale's edge", "fracture", "pull",
@@ -205,9 +177,6 @@ local RARITIES = {
     "Legendary", "Rare", "Duo", "Normal",
 }
 
--- ============================================================
--- FPS TRACKER
--- ============================================================
 local FPS = {
     frames = 0, elapsed = 0, current = 60, smoothed = 60,
     instant = 60, lastDt = 1/60, spikeActive = false,
@@ -260,19 +229,6 @@ local function fpsComp(fps)
     return math.min(ratio * CFG.fpsCompFactor, CFG.fpsCompMax)
 end
 
-local function autoFpsTier(fps)
-    for _, t in ipairs(FPS_TIERS) do
-        if fps >= t.minFps then
-            CFG.fpsCompFactor = t.factor
-            CFG.fpsCompMax   = t.cap
-            return
-        end
-    end
-end
-
--- ============================================================
--- CONNECTION TRACKER
--- ============================================================
 local conns = {}
 local function track(c)
     table.insert(conns, c)
@@ -309,10 +265,6 @@ local function getPing()
     return ok and (val / 1000) or 0
 end
 
--- ============================================================
--- BALL
--- ============================================================
--- non-blocking: do not stall UI build waiting for Balls
 local BallsFolder = Workspace:FindFirstChild("Balls")
 task.spawn(function()
     if not BallsFolder then
@@ -340,9 +292,6 @@ local function isTargeted(ball)
     return char ~= nil and char:FindFirstChild("Highlight") ~= nil
 end
 
--- ============================================================
--- PARRY INPUT
--- ============================================================
 local parryRemote = nil
 local hasKeypress = (type(keypress) == "function" and type(keyrelease) == "function")
 
@@ -392,14 +341,14 @@ local function doParry()
     elseif m == "Keypress" then
         parryKey()
     else
-        parryRemoteFire()
-        parryMouse()
+        if findParryRemote() then
+            parryRemoteFire()
+        else
+            parryMouse()
+        end
     end
 end
 
--- ============================================================
--- STATE
--- ============================================================
 local currentBall, ballTargetConn, ballLocked = nil, nil, false
 local lastParryTime, lastParryBall = 0, nil
 local clashActive, clashTime = false, 0
@@ -500,9 +449,6 @@ local function timeToImpact(dist, speed, accel)
     return dist / speed
 end
 
--- ============================================================
--- CAMERA CURVE
--- ============================================================
 local camCurve = {
     active = false, startTime = 0, duration = CURVE_DURATION,
     yaw = 0, pitch = 0, roll = 0, fovBoost = 0, originalFov = nil,
@@ -592,9 +538,6 @@ pcall(function()
     RunService:BindToRenderStep(CAMERA_BIND, Enum.RenderPriority.Camera.Value + 1, stepCamCurve)
 end)
 
--- ============================================================
--- ABILITY COUNTER
--- ============================================================
 local ability = {
     active = false, type = nil, startTime = 0, duration = 0,
     windowMod = 1.0, lastDir = Vector3.zero, detectionCooldown = 0,
@@ -813,9 +756,6 @@ task.spawn(function()
     if existing then attachBall(existing) end
 end)
 
--- ============================================================
--- UNLOCKS
--- ============================================================
 local Unlock = {
     initialized   = false,
     originals     = {},
@@ -1083,9 +1023,6 @@ local function stopAutoReequip()
     end
 end
 
--- ============================================================
--- ANTI AFK / FPS BOOST
--- ============================================================
 local antiAfkConn = nil
 local function startAntiAfk()
     if antiAfkConn then return end
@@ -1130,9 +1067,6 @@ local function restoreFpsBoost()
     end)
 end
 
--- ============================================================
--- VISUALS
--- ============================================================
 local orbParts = {}
 local function destroyOrb()
     for _, p in ipairs(orbParts) do
@@ -1194,9 +1128,6 @@ local function ensureOverhead()
     return bb
 end
 
--- ============================================================
--- PRESENCE
--- ============================================================
 local Presence = {
     enabled           = false,
     billboardsEnabled = true,
@@ -1212,7 +1143,6 @@ local Presence = {
 }
 
 local TIER_TABLE = {
-    -- [UserId] = "C" / "A" / "M" / "T"
     [7295943857] = "C",
 }
 
@@ -1395,8 +1325,6 @@ local function stopBillboardAnim()
 end
 
 local function broadcastPresence()
-    -- Presence is visual + local detection only in this port.
-    -- Network presence can be extended later with a remote or chat tag.
 end
 
 local function stopPresence()
@@ -1409,26 +1337,40 @@ local function stopPresence()
     Presence.known = {}
 end
 
--- ============================================================
--- MAIN PARRY LOOP
--- ============================================================
 local mainConn = nil
+local cachedPing = 0
+local pingRefreshAt = 0
+local cachedFps = 60
+local lastOverheadUpdate = 0
+local lastMoveApply = 0
 
-local function calcWindow(speed, ping, fps)
+local function refreshPing()
+    local now = os.clock()
+    if now - pingRefreshAt >= 0.2 then
+        pingRefreshAt = now
+        cachedPing = getPing()
+    end
+    return cachedPing
+end
+
+local function calcWindow(speed)
     local base = CFG.windowBase
     local maxW = CFG.windowMax
     local minW = CFG.windowMin
     local speedFac = CFG.windowSpeedFac
-    local pingFac  = CFG.windowPingFac
+    local pingFac = CFG.windowPingFac
+    local ping = cachedPing
 
     if CFG.autoWindow then
-        for _, tier in ipairs(PING_TIERS) do
-            if ping * 1000 <= tier.maxPing then
-                base     = tier.base
+        local ms = ping * 1000
+        for i = 1, #PING_TIERS do
+            local tier = PING_TIERS[i]
+            if ms <= tier.maxPing then
+                base = tier.base
                 speedFac = tier.speedFac
-                maxW     = tier.max
-                minW     = tier.min
-                pingFac  = tier.pingFac
+                maxW = tier.max
+                minW = tier.min
+                pingFac = tier.pingFac
                 break
             end
         end
@@ -1438,7 +1380,9 @@ local function calcWindow(speed, ping, fps)
     if CFG.useAutoPing then
         window = window + ping * pingFac
     end
-    window = window + fpsComp(fps)
+    if CFG.useFpsComp then
+        window = window + fpsComp(cachedFps)
+    end
     window = window * abilityWindowMod()
     if CFG.useDynamicWindow then
         window = window * CFG.simpleRatio
@@ -1446,27 +1390,43 @@ local function calcWindow(speed, ping, fps)
     return math.clamp(window, minW, maxW)
 end
 
-local function shouldParry(ball, dt)
-    if not ball or not isTargeted(ball) then return false end
-    local root = getRoot()
+local function approachDistance(ballPos, vel, rootPos)
+    local toRoot = rootPos - ballPos
+    local dist = toRoot.Magnitude
+    if dist < 0.01 then return 0 end
+    local speed = vel.Magnitude
+    if speed < 0.1 then return dist end
+    local dir = vel.Unit
+    local closing = dir:Dot(toRoot.Unit)
+    if closing <= 0.05 then
+        return dist
+    end
+    return dist / closing
+end
+
+local function shouldParry(ball, dt, root)
+    if not ball then return false end
+    if not isTargeted(ball) then return false end
     if not root then return false end
 
-    local pos  = ball.Position
-    local vel  = getBallVelocity(ball, dt)
-    local speed= vel.Magnitude
-    local dist = (pos - root.Position).Magnitude
+    local pos = ball.Position
+    local rootPos = root.Position
+    local vel = getBallVelocity(ball, dt)
+    local speed = vel.Magnitude
+    local dist = (pos - rootPos).Magnitude
 
     if dist > CFG.maxParryDistance then return false end
 
     if CFG.maxParryAngle < 180 and speed > 1 then
-        local toPlayer = (root.Position - pos).Unit
-        local dir = vel.Unit
-        local ang = math.deg(math.acos(math.clamp(dir:Dot(toPlayer), -1, 1)))
-        if ang > CFG.maxParryAngle then return false end
+        local toPlayer = (rootPos - pos)
+        if toPlayer.Magnitude > 0.01 then
+            local ang = math.deg(math.acos(math.clamp(vel.Unit:Dot(toPlayer.Unit), -1, 1)))
+            if ang > CFG.maxParryAngle then return false end
+        end
     end
 
     local now = os.clock()
-    if ball == lastParryBall and now - lastParryTime < CFG.sameBallLockout then
+    if ball == lastParryBall and (now - lastParryTime) < CFG.sameBallLockout then
         return false
     end
 
@@ -1475,19 +1435,23 @@ local function shouldParry(ball, dt)
         accel = (speed - ballTrack.speed) / math.max(dt, 0.001)
     end
 
-    local tti = timeToImpact(dist, speed, accel)
-    local ping = getPing()
-    local fps  = getFps()
-    local window = calcWindow(speed, ping, fps)
+    local effectiveDist = dist
+    if CFG.curvePrediction and speed > 3 then
+        effectiveDist = approachDistance(pos, vel, rootPos)
+    end
 
-    if CFG.curvePrediction and speed > 5 then
-        -- slight early bias on high speed
-        window = window * 1.05
+    local tti = timeToImpact(effectiveDist, speed, accel)
+    local window = calcWindow(speed)
+
+    if speed > 80 then
+        window = window + 0.02
+    elseif speed > 40 then
+        window = window + 0.01
     end
 
     if clashActive and CFG.clashPriority then
         local spam = CLASH_MODES[CFG.clashSpamMode] or 0.15
-        if now - lastParryTime >= spam then
+        if (now - lastParryTime) >= spam then
             return true
         end
     end
@@ -1496,14 +1460,18 @@ local function shouldParry(ball, dt)
 end
 
 local function mainLoop(dt)
-    updateFps(dt)
-    if CFG.autoFps then
-        autoFpsTier(FPS.smoothed)
-    end
+    if dt > 0.1 then dt = 0.1 end
+    cachedFps = updateFps(dt)
+    refreshPing()
 
-    local ball = getRealBall()
-    if ball and ball ~= currentBall then
-        attachBall(ball)
+    local needBall = CFG.autoParry or CFG.orbOn or CFG.showImpactTime or CFG.autoClash or CFG.abilityCounter
+    local ball = nil
+
+    if needBall then
+        ball = getRealBall()
+        if ball and ball ~= currentBall then
+            attachBall(ball)
+        end
     end
 
     if ball then
@@ -1512,46 +1480,52 @@ local function mainLoop(dt)
         if ballTrack.ball == ball and ballTrack.hasSample then
             ballTrack.accel = (speed - ballTrack.speed) / math.max(dt, 0.001)
         end
-        ballTrack.ball      = ball
-        ballTrack.pos       = ball.Position
-        ballTrack.speed     = speed
-        ballTrack.smooth    = ballTrack.smooth + (speed - ballTrack.smooth) * 0.25
+        ballTrack.ball = ball
+        ballTrack.pos = ball.Position
+        ballTrack.speed = speed
+        ballTrack.smooth = ballTrack.smooth + (speed - ballTrack.smooth) * 0.3
         ballTrack.hasSample = true
 
-        updateClash(ball)
-        updateAbility(ball, dt)
+        if CFG.autoClash then
+            updateClash(ball)
+        end
+        if CFG.abilityCounter then
+            updateAbility(ball, dt)
+        end
 
-        if CFG.autoParry and shouldParry(ball, dt) then
-            local accuracy = CFG.parryAccuracy
-            if accuracy >= 100 or math.random(1, 100) <= accuracy then
-                doParry()
-                lastParryTime = os.clock()
-                lastParryBall = ball
-                ballLocked    = true
+        if CFG.autoParry then
+            local root = getRoot()
+            if shouldParry(ball, dt, root) then
+                local accuracy = CFG.parryAccuracy
+                if accuracy >= 100 or math.random(1, 100) <= accuracy then
+                    doParry()
+                    lastParryTime = os.clock()
+                    lastParryBall = ball
+                    ballLocked = true
+                end
             end
         end
 
-        -- Orb
         if CFG.orbOn then
             if #orbParts == 0 then createOrb() end
-            if orbParts[1] then
-                orbParts[1].Position = ball.Position
+            local orb = orbParts[1]
+            if orb then
+                orb.CFrame = CFrame.new(ball.Position)
             end
-        else
-            destroyOrb()
         end
 
-        -- Overhead
         if CFG.showImpactTime then
-            local gui = ensureOverhead()
-            if gui then
-                local root = getRoot()
-                if root then
-                    local dist = (ball.Position - root.Position).Magnitude
-                    local tti  = timeToImpact(dist, ballTrack.smooth, ballTrack.accel)
+            local now = os.clock()
+            if now - lastOverheadUpdate >= 0.05 then
+                lastOverheadUpdate = now
+                local gui = ensureOverhead()
+                if gui then
+                    local root = getRoot()
                     local label = gui:FindFirstChild("Impact")
-                    if label then
-                        if tti < 10 then
+                    if label and root then
+                        local dist = (ball.Position - root.Position).Magnitude
+                        local tti = timeToImpact(dist, ballTrack.smooth, ballTrack.accel)
+                        if tti < 8 then
                             label.Text = string.format("%.0f ms", tti * 1000)
                         else
                             label.Text = ""
@@ -1559,31 +1533,40 @@ local function mainLoop(dt)
                     end
                 end
             end
-        else
-            destroyOverhead()
         end
     else
-        destroyOrb()
-        destroyOverhead()
-        resetBallTrack()
+        if ballTrack.hasSample then
+            resetBallTrack()
+        end
+        if not CFG.orbOn and #orbParts > 0 then
+            destroyOrb()
+        end
+        if not CFG.showImpactTime then
+            destroyOverhead()
+        end
     end
 
-    -- Movement
-    local hum = getHumanoid()
-    if hum then
-        if CFG.walkEnabled then
-            hum.WalkSpeed = CFG.walkSpeed
-        end
-        if CFG.jumpEnabled then
-            hum.JumpPower = CFG.jumpPower
-            hum.UseJumpPower = true
+    if CFG.walkEnabled or CFG.jumpEnabled then
+        local now = os.clock()
+        if now - lastMoveApply >= 0.15 then
+            lastMoveApply = now
+            local hum = getHumanoid()
+            if hum then
+                if CFG.walkEnabled then
+                    hum.WalkSpeed = CFG.walkSpeed
+                end
+                if CFG.jumpEnabled then
+                    hum.JumpPower = CFG.jumpPower
+                    hum.UseJumpPower = true
+                end
+            end
         end
     end
 end
 
 local function startMainLoop()
     if mainConn then return end
-    mainConn = RunService.RenderStepped:Connect(mainLoop)
+    mainConn = RunService.Heartbeat:Connect(mainLoop)
     track(mainConn)
 end
 
@@ -1598,15 +1581,10 @@ local function refreshLoops()
     if CFG.autoParry or CFG.orbOn or CFG.showImpactTime or CFG.walkEnabled or CFG.jumpEnabled or CFG.autoClash or CFG.abilityCounter then
         startMainLoop()
     else
-        -- keep loop light if nothing needs it, but still update fps for auto window
         if not mainConn then startMainLoop() end
     end
 end
 
--- ============================================================
--- UI — TEMPO TABS (same names as LexBlade)
--- Win:Tab only takes the name. Icon is auto-matched.
--- ============================================================
 local TabParry    = UI:Tab("Auto Parry")
 local TabVisuals  = UI:Tab("Visuals")
 local TabSocial   = UI:Tab("Social")
@@ -1614,7 +1592,6 @@ local TabUnlocks  = UI:Tab("Unlocks")
 local TabMovement = UI:Tab("Movement")
 local TabMisc     = UI:Tab("Misc")
 
--- -------------------- AUTO PARRY --------------------
 TabParry:Section("Auto Parry")
 TabParry:Toggle("Auto Parry", false, function(v)
     CFG.autoParry = v
@@ -1631,7 +1608,6 @@ TabParry:Dropdown("Parry Method", { "Dual", "Mouse", "Remote", "Keypress" }, "Du
     CFG.parryMethod = v
 end)
 
--- LexBlade: Min=0 Max=100 Default=100 Step=5
 TabParry:Slider("Parry Accuracy (%)", 0, 100, 100, function(v)
     CFG.parryAccuracy = math.floor(v / 5 + 0.5) * 5
 end, "%")
@@ -1645,27 +1621,22 @@ TabParry:Toggle("Dynamic Window", true, function(v)
     CFG.useDynamicWindow = v
 end)
 
--- LexBlade: Min=0.2 Max=1.0 Default=0.55 Step=0.05 (TempoUI matches)
 TabParry:Slider("Simple Ratio", 0.2, 1.0, 0.55, function(v)
     CFG.simpleRatio = v
 end)
 
--- LexBlade: Min=0.1 Max=0.6 Default=0.32 Step=0.01 → scale x100
 TabParry:Slider("Window Base (s)", 10, 60, 32, function(v)
     CFG.windowBase = v / 100
 end)
 
--- LexBlade: Min=0 Max=0.002 Default=0.00050 Step=0.00005 → scale x100000
 TabParry:Slider("Window Speed Factor", 0, 200, 50, function(v)
     CFG.windowSpeedFac = (math.floor(v / 5 + 0.5) * 5) / 100000
 end)
 
--- LexBlade: Min=0.2 Max=0.8 Default=0.45 Step=0.01 → scale x100
 TabParry:Slider("Window Max (s)", 20, 80, 45, function(v)
     CFG.windowMax = v / 100
 end)
 
--- LexBlade: Min=0.05 Max=0.4 Default=0.16 Step=0.01 → scale x100
 TabParry:Slider("Window Min (s)", 5, 40, 16, function(v)
     CFG.windowMin = v / 100
 end)
@@ -1675,11 +1646,6 @@ TabParry:Toggle("Add Ping To Window", true, function(v)
 end)
 
 TabParry:Section("FPS Sorter")
-TabParry:Toggle("Auto-FPS", false, function(v)
-    CFG.autoFps = v
-    if v then autoFpsTier(FPS.smoothed) end
-end)
-
 TabParry:Toggle("FPS Comp", true, function(v)
     CFG.useFpsComp = v
 end)
@@ -1688,17 +1654,14 @@ TabParry:Toggle("Fast Spike Response", true, function(v)
     CFG.fastSpikeResponse = v
 end)
 
--- LexBlade: Min=0 Max=0.10 Default=0.03 Step=0.005 → scale x1000
 TabParry:Slider("FPS Comp Factor", 0, 100, 30, function(v)
     CFG.fpsCompFactor = (math.floor(v / 5 + 0.5) * 5) / 1000
 end)
 
--- LexBlade: Min=0.02 Max=0.30 Default=0.12 Step=0.01 → scale x100
 TabParry:Slider("FPS Comp Max Cap (s)", 2, 30, 12, function(v)
     CFG.fpsCompMax = v / 100
 end)
 
--- LexBlade: Min=0 Max=360 Default=0 Step=5
 TabParry:Slider("FPS Override", 0, 360, 0, function(v)
     CFG.fpsOverride = math.floor(v / 5 + 0.5) * 5
 end)
@@ -1709,7 +1672,6 @@ TabParry:Dropdown("Curve Effect", { "Off", "Right", "Left", "Up", "Down", "Rando
     if v == "Off" then stopCamCurve() end
 end)
 
--- LexBlade: Min=0 Max=100 Default=35 Step=5
 TabParry:Slider("Camera Effect Strength (%)", 0, 100, 35, function(v)
     CFG.curveDeflectStrength = math.floor(v / 5 + 0.5) * 5
 end, "%")
@@ -1736,12 +1698,10 @@ TabParry:Toggle("Auto-Configure Clash", false, function(v)
     CFG.autoClashConfig = v
 end)
 
--- LexBlade: Min=10 Max=40 Default=20 Step=1
 TabParry:Slider("Clash Detection Radius (studs)", 10, 40, 20, function(v)
     CFG.clashDetectRadius = v
 end, " studs")
 
--- LexBlade: Min=2 Max=8 Default=3 Step=1
 TabParry:Slider("Exchange Threshold", 2, 8, 3, function(v)
     CFG.clashExchangeThreshold = v
 end)
@@ -1761,23 +1721,19 @@ TabParry:Toggle("Ability Counter", false, function(v)
     refreshLoops()
 end)
 
--- LexBlade: Min=20 Max=100 Default=50 Step=5 → stored 0.20..1.00
 TabParry:Slider("Speed Spike Threshold (%)", 20, 100, 50, function(v)
     CFG.abilitySpikeThreshold = (math.floor(v / 5 + 0.5) * 5) / 100
 end, "%")
 
 TabParry:Section("Filters")
--- LexBlade: Min=0 Max=200 Default=100 Step=5
 TabParry:Slider("Max Parry Distance (studs)", 0, 200, 100, function(v)
     CFG.maxParryDistance = math.floor(v / 5 + 0.5) * 5
 end, " studs")
 
--- LexBlade: Min=30 Max=180 Default=180 Step=5
 TabParry:Slider("Max Parry Angle (degrees)", 30, 180, 180, function(v)
     CFG.maxParryAngle = math.floor(v / 5 + 0.5) * 5
 end, "°")
 
--- LexBlade: Min=0 Max=300 Default=80 Step=5 → stored as seconds
 TabParry:Slider("Same-Ball Lockout (ms)", 0, 300, 80, function(v)
     CFG.sameBallLockout = (math.floor(v / 5 + 0.5) * 5) / 1000
 end, " ms")
@@ -1786,7 +1742,6 @@ TabParry:Toggle("Curve Prediction", true, function(v)
     CFG.curvePrediction = v
 end)
 
--- -------------------- VISUALS --------------------
 TabVisuals:Section("Visuals")
 TabVisuals:Toggle("Parry Orb", false, function(v)
     CFG.orbOn = v
@@ -1804,7 +1759,6 @@ TabVisuals:Toggle("Overhead Stats", true, function(v)
     refreshLoops()
 end)
 
--- -------------------- SOCIAL --------------------
 TabSocial:Section("Presence")
 TabSocial:Label("When enabled, other TempoHub users in the same server can be detected and their tier is shown above their head.")
 
@@ -1862,7 +1816,6 @@ task.spawn(function()
     end
 end)
 
--- -------------------- UNLOCKS --------------------
 TabUnlocks:Section("Locker Visibility")
 TabUnlocks:Label("Every unowned cosmetic becomes unlocked for you. It will appear within your locker.")
 
@@ -1989,7 +1942,6 @@ TabUnlocks:Section("Info")
 TabUnlocks:Label("Explosions cannot be force-equipped client-side — the server broadcasts the equipped explosion on kill.")
 TabUnlocks:Label("Some low-level executors need Force Equip because they do not intercept the locker equip call.")
 
--- async sword load
 task.spawn(function()
     local ok, err = pcall(function()
         Unlock.enumerateSwords()
@@ -2001,7 +1953,6 @@ task.spawn(function()
     end
 end)
 
--- -------------------- MOVEMENT --------------------
 TabMovement:Section("Movement")
 TabMovement:Toggle("Custom Walk Speed", false, function(v)
     CFG.walkEnabled = v
@@ -2034,7 +1985,6 @@ track(UserInputService.JumpRequest:Connect(function()
     end
 end))
 
--- -------------------- MISC --------------------
 TabMisc:Section("Utility")
 TabMisc:Toggle("Anti AFK", false, function(v)
     CFG.antiAfk = v
@@ -2074,9 +2024,6 @@ TabMisc:Button("Unload Script", true, function()
     print("[TempoHub] Script unloaded.")
 end)
 
--- ============================================================
--- CLEANUP + BOOT
--- ============================================================
 env.__TEMPOHUB_CLEANUP = function()
     env.__TEMPOHUB_LOADED = false
     if Presence.enabled then pcall(stopPresence) end
@@ -2112,11 +2059,9 @@ if not FS.available then
     end)
 end
 
--- start light loop so fps / window stay live
 startMainLoop()
 
 UI:Boot({ "checking executor", "building interface", "ready" }, function()
-    -- force first tab open so content is built immediately
     pcall(function()
         if UI.Select then
             UI:Select("Auto Parry")
