@@ -1631,8 +1631,9 @@ TabParry:Dropdown("Parry Method", { "Dual", "Mouse", "Remote", "Keypress" }, "Du
     CFG.parryMethod = v
 end)
 
+-- LexBlade: Min=0 Max=100 Default=100 Step=5
 TabParry:Slider("Parry Accuracy (%)", 0, 100, 100, function(v)
-    CFG.parryAccuracy = v
+    CFG.parryAccuracy = math.floor(v / 5 + 0.5) * 5
 end, "%")
 
 TabParry:Section("Timing Window")
@@ -1644,25 +1645,30 @@ TabParry:Toggle("Dynamic Window", true, function(v)
     CFG.useDynamicWindow = v
 end)
 
+-- LexBlade: Min=0.2 Max=1.0 Default=0.55 Step=0.05 (TempoUI matches)
 TabParry:Slider("Simple Ratio", 0.2, 1.0, 0.55, function(v)
     CFG.simpleRatio = v
 end)
 
-TabParry:Slider("Window Base (s)", 0.1, 0.6, 0.32, function(v)
-    CFG.windowBase = v
-end, " s")
-
-TabParry:Slider("Window Speed Factor", 0.0, 0.002, 0.00050, function(v)
-    CFG.windowSpeedFac = v
+-- LexBlade: Min=0.1 Max=0.6 Default=0.32 Step=0.01 → scale x100
+TabParry:Slider("Window Base (s)", 10, 60, 32, function(v)
+    CFG.windowBase = v / 100
 end)
 
-TabParry:Slider("Window Max (s)", 0.2, 0.8, 0.45, function(v)
-    CFG.windowMax = v
-end, " s")
+-- LexBlade: Min=0 Max=0.002 Default=0.00050 Step=0.00005 → scale x100000
+TabParry:Slider("Window Speed Factor", 0, 200, 50, function(v)
+    CFG.windowSpeedFac = (math.floor(v / 5 + 0.5) * 5) / 100000
+end)
 
-TabParry:Slider("Window Min (s)", 0.05, 0.4, 0.16, function(v)
-    CFG.windowMin = v
-end, " s")
+-- LexBlade: Min=0.2 Max=0.8 Default=0.45 Step=0.01 → scale x100
+TabParry:Slider("Window Max (s)", 20, 80, 45, function(v)
+    CFG.windowMax = v / 100
+end)
+
+-- LexBlade: Min=0.05 Max=0.4 Default=0.16 Step=0.01 → scale x100
+TabParry:Slider("Window Min (s)", 5, 40, 16, function(v)
+    CFG.windowMin = v / 100
+end)
 
 TabParry:Toggle("Add Ping To Window", true, function(v)
     CFG.useAutoPing = v
@@ -1682,16 +1688,19 @@ TabParry:Toggle("Fast Spike Response", true, function(v)
     CFG.fastSpikeResponse = v
 end)
 
-TabParry:Slider("FPS Comp Factor", 0.0, 0.10, 0.03, function(v)
-    CFG.fpsCompFactor = v
+-- LexBlade: Min=0 Max=0.10 Default=0.03 Step=0.005 → scale x1000
+TabParry:Slider("FPS Comp Factor", 0, 100, 30, function(v)
+    CFG.fpsCompFactor = (math.floor(v / 5 + 0.5) * 5) / 1000
 end)
 
-TabParry:Slider("FPS Comp Max Cap (s)", 0.02, 0.30, 0.12, function(v)
-    CFG.fpsCompMax = v
-end, " s")
+-- LexBlade: Min=0.02 Max=0.30 Default=0.12 Step=0.01 → scale x100
+TabParry:Slider("FPS Comp Max Cap (s)", 2, 30, 12, function(v)
+    CFG.fpsCompMax = v / 100
+end)
 
+-- LexBlade: Min=0 Max=360 Default=0 Step=5
 TabParry:Slider("FPS Override", 0, 360, 0, function(v)
-    CFG.fpsOverride = v
+    CFG.fpsOverride = math.floor(v / 5 + 0.5) * 5
 end)
 
 TabParry:Section("Camera Curve Effect")
@@ -1700,8 +1709,9 @@ TabParry:Dropdown("Curve Effect", { "Off", "Right", "Left", "Up", "Down", "Rando
     if v == "Off" then stopCamCurve() end
 end)
 
+-- LexBlade: Min=0 Max=100 Default=35 Step=5
 TabParry:Slider("Camera Effect Strength (%)", 0, 100, 35, function(v)
-    CFG.curveDeflectStrength = v
+    CFG.curveDeflectStrength = math.floor(v / 5 + 0.5) * 5
 end, "%")
 
 TabParry:Button("Test Camera Effect", false, function()
@@ -1726,10 +1736,12 @@ TabParry:Toggle("Auto-Configure Clash", false, function(v)
     CFG.autoClashConfig = v
 end)
 
+-- LexBlade: Min=10 Max=40 Default=20 Step=1
 TabParry:Slider("Clash Detection Radius (studs)", 10, 40, 20, function(v)
     CFG.clashDetectRadius = v
 end, " studs")
 
+-- LexBlade: Min=2 Max=8 Default=3 Step=1
 TabParry:Slider("Exchange Threshold", 2, 8, 3, function(v)
     CFG.clashExchangeThreshold = v
 end)
@@ -1749,21 +1761,25 @@ TabParry:Toggle("Ability Counter", false, function(v)
     refreshLoops()
 end)
 
+-- LexBlade: Min=20 Max=100 Default=50 Step=5 → stored 0.20..1.00
 TabParry:Slider("Speed Spike Threshold (%)", 20, 100, 50, function(v)
-    CFG.abilitySpikeThreshold = v / 100
+    CFG.abilitySpikeThreshold = (math.floor(v / 5 + 0.5) * 5) / 100
 end, "%")
 
 TabParry:Section("Filters")
+-- LexBlade: Min=0 Max=200 Default=100 Step=5
 TabParry:Slider("Max Parry Distance (studs)", 0, 200, 100, function(v)
-    CFG.maxParryDistance = v
+    CFG.maxParryDistance = math.floor(v / 5 + 0.5) * 5
 end, " studs")
 
+-- LexBlade: Min=30 Max=180 Default=180 Step=5
 TabParry:Slider("Max Parry Angle (degrees)", 30, 180, 180, function(v)
-    CFG.maxParryAngle = v
+    CFG.maxParryAngle = math.floor(v / 5 + 0.5) * 5
 end, "°")
 
+-- LexBlade: Min=0 Max=300 Default=80 Step=5 → stored as seconds
 TabParry:Slider("Same-Ball Lockout (ms)", 0, 300, 80, function(v)
-    CFG.sameBallLockout = v / 1000
+    CFG.sameBallLockout = (math.floor(v / 5 + 0.5) * 5) / 1000
 end, " ms")
 
 TabParry:Toggle("Curve Prediction", true, function(v)
