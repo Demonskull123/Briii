@@ -90,7 +90,7 @@ local CFG = {
     fpsCompMax             = 0.12,
     fpsOverride            = 0,
     fastSpikeResponse      = true,
-    maxParryDistance       = 100,
+    maxParryDistance       = 5,
     maxParryAngle          = 180,
     sameBallLockout        = 0.08,
     curvePrediction        = true,
@@ -293,61 +293,137 @@ local function isTargeted(ball)
 end
 
 local parryRemote = nil
-local hasKeypress = (type(keypress) == "function" and type(keyrelease) == "function")
+local parryRemoteIsBindable = false
+local PARRY_NAME_HINTS = {
+    "parrybuttonpress", "parrybutton", "parrypress", "parry",
+    "deflect", "blockbutton", "swing",
+}
 
-local function findParryRemote()
-    if parryRemote and parryRemote.Parent then return true end
-    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-    if not remotes then return false end
-    local r = remotes:FindFirstChild("ParryButtonPress")
-    if r then
-        parryRemote = r
-        return true
+local function nameLooksLikeParry(name)
+    local n = string.lower(tostring(name or ""))
+    for i = 1, #PARRY_NAME_HINTS do
+        if string.find(n, PARRY_NAME_HINTS[i], 1, true) then
+            return true
+        end
     end
     return false
 end
 
+local function setParryRemote(obj)
+    if not obj or not obj.Parent then return false end
+    parryRemote = obj
+    parryRemoteIsBindable = obj:IsA("BindableEvent")
+    return true
+end
+
+local function findParryRemote()
+    if parryRemote and parryRemote.Parent then return true end
+
+    local candidates = {}
+    local function consider(obj)
+        if not obj then return end
+        if obj:IsA("RemoteEvent") or obj:IsA("BindableEvent") or obj:IsA("RemoteFunction") then
+            if nameLooksLikeParry(obj.Name) then
+                candidates[#candidates + 1] = obj
+            end
+        end
+    end
+
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+    if remotes then
+        consider(remotes:FindFirstChild("ParryButtonPress"))
+        for _, d in ipairs(remotes:GetDescendants()) do
+            consider(d)
+        end
+    end
+    for _, d in ipairs(ReplicatedStorage:GetDescendants()) do
+        consider(d)
+    end
+
+    for i = 1, #candidates do
+        local c = candidates[i]
+        if c.Name == "ParryButtonPress" then
+            return setParryRemote(c)
+        end
+    end
+    if candidates[1] then
+        return setParryRemote(candidates[1])
+    end
+    return false
+end
+
+local function installParryCapture()
+    local mt = getrawmetatable and getrawmetatable(game)
+    if not mt then return end
+    local oldNamecall = mt.__namecall
+    if type(hookmetamethod) == "function" then
+        local old
+        old = hookmetamethod(game, "__namecall", function(self, ...)
+            local method = getnamecallmethod and getnamecallmethod() or ""
+            if method == "FireServer" or method == "Fire" or method == "InvokeServer" then
+                if typeof(self) == "Instance" and nameLooksLikeParry(self.Name) then
+                    setParryRemote(self)
+                end
+            end
+            return old(self, ...)
+        end)
+    elseif mt and oldNamecall then
+        pcall(function()
+            setreadonly(mt, false)
+            mt.__namecall = function(self, ...)
+                local method = getnamecallmethod and getnamecallmethod() or ""
+                if method == "FireServer" or method == "Fire" or method == "InvokeServer" then
+                    if typeof(self) == "Instance" and nameLooksLikeParry(self.Name) then
+                        setParryRemote(self)
+                    end
+                end
+                return oldNamecall(self, ...)
+            end
+            setreadonly(mt, true)
+        end)
+    end
+end
+pcall(installParryCapture)
+
 local function parryMouse()
     pcall(function()
-        VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 0)
-        task.wait(0.01)
-        VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+        VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+        VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
     end)
 end
 
 local function parryRemoteFire()
-    if not findParryRemote() then return end
-    pcall(function() parryRemote:Fire() end)
-end
-
-local function parryKey()
-    if not hasKeypress then
-        parryMouse()
-        return
+    if not findParryRemote() then return false end
+    local r = parryRemote
+    if not r then return false end
+    local ok = false
+    if r:IsA("RemoteEvent") then
+        ok = pcall(function() r:FireServer() end)
+    elseif r:IsA("BindableEvent") then
+        ok = pcall(function() r:Fire() end)
+    elseif r:IsA("RemoteFunction") then
+        ok = pcall(function() r:InvokeServer() end)
+    else
+        ok = pcall(function() r:Fire() end)
+        if not ok then
+            ok = pcall(function() r:FireServer() end)
+        end
     end
-    pcall(function()
-        keypress(0x46)
-        task.wait(0.01)
-        keyrelease(0x46)
-    end)
+    return ok
 end
 
 local function doParry()
-    local m = CFG.parryMethod
-    if m == "Mouse" then
+    if not parryRemoteFire() then
         parryMouse()
-    elseif m == "Remote" then
-        parryRemoteFire()
-    elseif m == "Keypress" then
-        parryKey()
-    else
-        if findParryRemote() then
-            parryRemoteFire()
-        else
-            parryMouse()
-        end
     end
 end
+
+task.spawn(function()
+    for _ = 1, 10 do
+        if findParryRemote() then break end
+        task.wait(0.5)
+    end
+end)
 
 local currentBall, ballTargetConn, ballLocked = nil, nil, false
 local lastParryTime, lastParryBall = 0, nil
@@ -1604,7 +1680,7 @@ TabParry:Toggle("Auto Parry", false, function(v)
     refreshLoops()
 end)
 
-TabParry:Dropdown("Parry Method", { "Dual", "Mouse", "Remote", "Keypress" }, "Dual", function(v)
+TabParry:Dropdown("Parry Method", { "Dual", "Remote" }, "Dual", function(v)
     CFG.parryMethod = v
 end)
 
@@ -1726,8 +1802,8 @@ TabParry:Slider("Speed Spike Threshold (%)", 20, 100, 50, function(v)
 end, "%")
 
 TabParry:Section("Filters")
-TabParry:Slider("Max Parry Distance (studs)", 0, 200, 100, function(v)
-    CFG.maxParryDistance = math.floor(v / 5 + 0.5) * 5
+TabParry:Slider("Max Parry Distance (studs)", 1, 20, 5, function(v)
+    CFG.maxParryDistance = math.clamp(math.floor(v + 0.5), 1, 20)
 end, " studs")
 
 TabParry:Slider("Max Parry Angle (degrees)", 30, 180, 180, function(v)
@@ -2045,12 +2121,6 @@ if next(TIER_TABLE) == nil then
     warn("[TempoHub] TIER_TABLE is empty: every user will show as TH USER. Add UserIds to enable higher tiers.")
 end
 
-if not hasKeypress then
-    task.spawn(function()
-        task.wait(3)
-        notify("Auto Parry", "Keypress not supported. Mouse and Remote will work.")
-    end)
-end
 
 if not FS.available then
     task.spawn(function()
