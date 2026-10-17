@@ -36,6 +36,97 @@ local function safeCall(label, fn)
     return ok
 end
 
+pcall(function()
+    local function isBlockedRemote(name)
+        if type(name) ~= "string" then return false end
+        local n = string.lower(name)
+        return n:find("anticheat", 1, true)
+            or n:find("detect", 1, true)
+            or n:find("ban", 1, true)
+            or n:find("flag", 1, true)
+            or n:find("report", 1, true)
+            or n:find("vote", 1, true)
+            or n:find("kick", 1, true)
+    end
+    local function wrap(fn)
+        if type(newcclosure) == "function" then
+            return newcclosure(fn)
+        end
+        return fn
+    end
+    if type(hookmetamethod) == "function" then
+        local old
+        old = hookmetamethod(game, "__namecall", wrap(function(self, ...)
+            local method = getnamecallmethod()
+            if method == "Kick" and self == LocalPlayer then
+                return nil
+            end
+            if method == "FireServer" or method == "InvokeServer" then
+                local ok, name = pcall(function() return self.Name end)
+                if ok and isBlockedRemote(name) then
+                    return nil
+                end
+            end
+            return old(self, ...)
+        end))
+    else
+        local mt = getrawmetatable(game)
+        if not mt then return end
+        local oldNC = mt.__namecall
+        setreadonly(mt, false)
+        mt.__namecall = wrap(function(self, ...)
+            local method = getnamecallmethod()
+            if method == "Kick" and self == LocalPlayer then
+                return nil
+            end
+            if method == "FireServer" or method == "InvokeServer" then
+                local ok, name = pcall(function() return self.Name end)
+                if ok and isBlockedRemote(name) then
+                    return nil
+                end
+            end
+            return oldNC(self, ...)
+        end)
+        setreadonly(mt, true)
+    end
+end)
+
+pcall(function()
+    local destroyed = setmetatable({}, { __mode = "k" })
+    local keywords = { "Banned", "Walkspeed", "Ban", "AntiCheat" }
+    local function containsBad(text)
+        for i = 1, #keywords do
+            if text:find(keywords[i], 1, true) then
+                return true
+            end
+        end
+        return false
+    end
+    local function isAntiCheat(scr)
+        if typeof(scr) ~= "Instance" or not scr:IsA("LuaSourceContainer") then
+            return false
+        end
+        local ok, src = pcall(function() return scr.Source end)
+        return ok and type(src) == "string" and containsBad(src)
+    end
+    local function tryKill(d)
+        if destroyed[d] then return end
+        if not (d:IsA("LocalScript") or d:IsA("ModuleScript") or d:IsA("Script")) then
+            return
+        end
+        if isAntiCheat(d) then
+            pcall(function() d:Destroy() end)
+            destroyed[d] = true
+        end
+    end
+    for _, d in ipairs(game:GetDescendants()) do
+        tryKill(d)
+    end
+    game.DescendantAdded:Connect(function(d)
+        task.defer(tryKill, d)
+    end)
+end)
+
 local FS = {
     available  = type(writefile) == "function" and type(readfile) == "function",
     baseFolder = "TempoHub",
