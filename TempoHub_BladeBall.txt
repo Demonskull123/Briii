@@ -1,0 +1,2095 @@
+-- ============================================================
+-- TEMPO HUB — Blade Ball
+-- Fully rewritten from LexBlade onto TeekUI / TempoUI
+-- All WindUI removed. Same tabs. Same features. Renamed.
+-- Version 0.2.0259
+-- ============================================================
+
+local env = (type(getgenv) == "function" and getgenv()) or _G
+if env.__TEMPOHUB_LOADED then
+    local cleanup = env.__TEMPOHUB_CLEANUP
+    if cleanup then pcall(cleanup) end
+end
+env.__TEMPOHUB_LOADED = true
+
+local Players            = game:GetService("Players")
+local RunService         = game:GetService("RunService")
+local UserInputService   = game:GetService("UserInputService")
+local VirtualUser        = game:GetService("VirtualUser")
+local VirtualInputManager= game:GetService("VirtualInputManager")
+local Lighting           = game:GetService("Lighting")
+local Workspace          = game:GetService("Workspace")
+local Stats              = game:GetService("Stats")
+local ReplicatedStorage  = game:GetService("ReplicatedStorage")
+local TeleportService    = game:GetService("TeleportService")
+local CoreGui            = game:GetService("CoreGui")
+local TextChatService    = game:GetService("TextChatService")
+
+local TeekUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Demonskull123/bundleui/refs/heads/main/TempoUI-bundle.lua"))()
+local UI = TeekUI.new({
+    Title    = "TEMPO",
+    Subtitle = "Blade Ball",
+    Version  = "v0.2.0259",
+    Preset   = "Haunted",
+})
+
+local LocalPlayer = Players.LocalPlayer
+
+local function safeCall(label, fn)
+    local ok, err = pcall(fn)
+    if not ok then
+        warn("[TempoHub] " .. tostring(label) .. " failed: " .. tostring(err))
+    end
+    return ok
+end
+
+-- ============================================================
+-- FILE SYSTEM
+-- ============================================================
+local FS = {
+    available  = type(writefile) == "function" and type(readfile) == "function",
+    baseFolder = "TempoHub",
+    filePath   = "TempoHub/lastSword.txt",
+}
+
+local function ensureFolder()
+    if not FS.available then return end
+    pcall(function()
+        if type(isfolder) == "function" and type(makefolder) == "function" then
+            if not isfolder(FS.baseFolder) then
+                makefolder(FS.baseFolder)
+            end
+        end
+    end)
+end
+
+local function writeFS(path, data)
+    if not FS.available then return false end
+    ensureFolder()
+    return pcall(function() writefile(path, tostring(data)) end)
+end
+
+local function readFS(path)
+    if not FS.available then return nil end
+    local ok, data = pcall(function()
+        if type(isfile) == "function" then
+            if not isfile(path) then return nil end
+            return readfile(path)
+        end
+        return readfile(path)
+    end)
+    if ok and type(data) == "string" and data ~= "" then return data end
+    return nil
+end
+
+-- ============================================================
+-- CONFIG
+-- ============================================================
+local CFG = {
+    autoParry              = false,
+    parryMethod            = "Dual",
+    parryAccuracy          = 100,
+    useDynamicWindow       = true,
+    simpleRatio            = 0.55,
+    autoWindow             = false,
+    useAutoPing            = true,
+    windowBase             = 0.32,
+    windowSpeedFac         = 0.00050,
+    windowMax              = 0.45,
+    windowMin              = 0.16,
+    windowPingFac          = 1.05,
+    useFpsComp             = true,
+    autoFps                = false,
+    fpsCompFactor          = 0.03,
+    fpsCompMax             = 0.12,
+    fpsOverride            = 0,
+    fastSpikeResponse      = true,
+    maxParryDistance       = 100,
+    maxParryAngle          = 180,
+    sameBallLockout        = 0.08,
+    curvePrediction        = true,
+    autoClash              = false,
+    autoClashConfig        = false,
+    clashDetectRadius      = 20,
+    clashExchangeThreshold = 3,
+    clashSpamMode          = "Pro",
+    clashPriority          = true,
+    abilityCounter         = false,
+    abilitySpikeThreshold  = 0.50,
+    curveDeflectMode       = "Off",
+    curveDeflectStrength   = 35,
+    unlockSwords           = false,
+    unlockExplosions       = false,
+    unlockEmotes           = false,
+    unlockFinishers        = false,
+    orbOn                  = false,
+    showImpactTime         = true,
+    walkEnabled            = false,
+    walkSpeed              = 24,
+    jumpEnabled            = false,
+    jumpPower              = 60,
+    infJump                = false,
+    antiAfk                = false,
+    fpsBoost               = false,
+    lastEquippedSword      = "Base Sword",
+    autoReequip            = false,
+    presenceEnabled        = false,
+    billboardEnabled       = true,
+}
+
+do
+    local saved = readFS(FS.filePath)
+    if saved and saved ~= "" and saved ~= "Base Sword" then
+        CFG.lastEquippedSword = saved
+    end
+end
+
+-- ============================================================
+-- CONSTANTS
+-- ============================================================
+local CAMERA_BIND     = "TempoHubCameraCurve"
+local CLASH_MODES     = { Legit = 0.20, Pro = 0.15, Master = 0.10, Machine = 0.06 }
+local CLASH_HISTORY   = 1.5
+local CLASH_FADE      = 0.3
+local CURVE_YAW       = 25
+local CURVE_PITCH     = 8
+local CURVE_FOV       = 3
+local CURVE_DURATION  = 0.38
+local FPS_TARGET      = 60
+local FPS_SPIKE_DT    = 0.05
+local FPS_SMOOTH_DT   = 0.10
+local ABILITY_SPIKE_T = 1.2
+local ABILITY_CURVE_D = 20
+local ABILITY_LOST_T  = 0.5
+local ENUM_CHUNK      = 50
+local DROPDOWN_CAP    = 200
+local VERSION         = "v.0.2.0259"
+
+local PING_TIERS = {
+    { maxPing = 30,   base = 0.28, speedFac = 0.00040, max = 0.40, min = 0.14, pingFac = 0.50 },
+    { maxPing = 80,   base = 0.32, speedFac = 0.00050, max = 0.45, min = 0.16, pingFac = 1.00 },
+    { maxPing = 150,  base = 0.36, speedFac = 0.00060, max = 0.50, min = 0.18, pingFac = 1.05 },
+    { maxPing = 250,  base = 0.42, speedFac = 0.00070, max = 0.58, min = 0.20, pingFac = 1.10 },
+    { maxPing = 9999, base = 0.48, speedFac = 0.00080, max = 0.65, min = 0.22, pingFac = 1.15 },
+}
+
+local FPS_TIERS = {
+    { minFps = 144, factor = 0.015, cap = 0.08 },
+    { minFps = 120, factor = 0.020, cap = 0.09 },
+    { minFps = 90,  factor = 0.025, cap = 0.10 },
+    { minFps = 60,  factor = 0.030, cap = 0.12 },
+    { minFps = 45,  factor = 0.040, cap = 0.14 },
+    { minFps = 30,  factor = 0.055, cap = 0.16 },
+    { minFps = 20,  factor = 0.070, cap = 0.18 },
+    { minFps = 0,   factor = 0.090, cap = 0.20 },
+}
+
+local ABILITY_DANGER = {
+    "singularity", "rapture", "death slash", "deathslash", "slashes of fury",
+    "slash of fury", "dribble", "gale", "gale's edge", "fracture", "pull",
+    "telekinesis", "windup", "rage", "raging deflect", "flash counter",
+}
+
+local ABILITY_SAFE = {
+    "reaper", "guardian angel", "quad jump", "luck", "misfortune",
+    "golden ball", "martyrdom", "nab", "pinpoint", "tactician", "tact",
+}
+
+local ABILITY_ATTRS = {
+    "CurrentlyEquippedAbility", "EquippedAbility", "Ability",
+    "selectedAbility", "ability",
+}
+
+local RARITIES = {
+    "Secret", "Unique", "Limited", "LimitedU",
+    "Legendary", "Rare", "Duo", "Normal",
+}
+
+-- ============================================================
+-- FPS TRACKER
+-- ============================================================
+local FPS = {
+    frames = 0, elapsed = 0, current = 60, smoothed = 60,
+    instant = 60, lastDt = 1/60, spikeActive = false,
+    spikeStartTime = 0, lowestRecent = 60, lowestRecentTime = 0,
+}
+
+local function updateFps(dt)
+    local clamped = math.clamp(dt, 0.001, FPS_SMOOTH_DT)
+    if clamped > 0.001 then
+        FPS.instant = math.clamp(1 / clamped, 5, 500)
+        FPS.lastDt  = clamped
+    end
+    local now = os.clock()
+    if dt > FPS_SPIKE_DT then
+        FPS.spikeActive = true
+        FPS.spikeStartTime = now
+        if FPS.instant < FPS.lowestRecent or now - FPS.lowestRecentTime > 0.5 then
+            FPS.lowestRecent = FPS.instant
+            FPS.lowestRecentTime = now
+        end
+    elseif FPS.spikeActive and now - FPS.spikeStartTime > 0.3 then
+        FPS.spikeActive = false
+    end
+    FPS.frames  = FPS.frames + 1
+    FPS.elapsed = FPS.elapsed + clamped
+    if FPS.elapsed >= 0.25 then
+        local raw = FPS.frames / FPS.elapsed
+        FPS.smoothed = FPS.smoothed + (raw - FPS.smoothed) * 0.3
+        FPS.current  = raw
+        FPS.frames   = 0
+        FPS.elapsed  = 0
+    end
+    if CFG.fpsOverride > 0 then return CFG.fpsOverride end
+    return math.clamp(FPS.smoothed, 10, 360)
+end
+
+local function getFps()
+    if CFG.fpsOverride > 0 then return CFG.fpsOverride end
+    if not CFG.fastSpikeResponse then
+        return math.clamp(FPS.smoothed, 10, 360)
+    end
+    local v = math.min(FPS.smoothed, FPS.instant)
+    if FPS.spikeActive then v = math.min(v, FPS.lowestRecent) end
+    return math.clamp(v, 5, 360)
+end
+
+local function fpsComp(fps)
+    if not CFG.useFpsComp then return 0 end
+    local ratio = FPS_TARGET / math.max(fps, 5)
+    return math.min(ratio * CFG.fpsCompFactor, CFG.fpsCompMax)
+end
+
+local function autoFpsTier(fps)
+    for _, t in ipairs(FPS_TIERS) do
+        if fps >= t.minFps then
+            CFG.fpsCompFactor = t.factor
+            CFG.fpsCompMax   = t.cap
+            return
+        end
+    end
+end
+
+-- ============================================================
+-- CONNECTION TRACKER
+-- ============================================================
+local conns = {}
+local function track(c)
+    table.insert(conns, c)
+    return c
+end
+
+local function disconnectAll()
+    for _, c in ipairs(conns) do
+        pcall(function() c:Disconnect() end)
+    end
+    conns = {}
+end
+
+local function getHumanoid()
+    local char = LocalPlayer.Character
+    return char and char:FindFirstChildOfClass("Humanoid")
+end
+
+local function getRoot()
+    local char = LocalPlayer.Character
+    return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function notify(title, content)
+    pcall(function()
+        UI:Notify(tostring(title) .. " — " .. tostring(content), "good")
+    end)
+end
+
+local function getPing()
+    local ok, val = pcall(function()
+        return Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+    end)
+    return ok and (val / 1000) or 0
+end
+
+-- ============================================================
+-- BALL
+-- ============================================================
+local BallsFolder = Workspace:WaitForChild("Balls", 30)
+
+local function getRealBall()
+    if not BallsFolder then return nil end
+    for _, b in ipairs(BallsFolder:GetChildren()) do
+        if b:IsA("BasePart") and b:GetAttribute("realBall") == true then
+            return b
+        end
+    end
+    return nil
+end
+
+local function isTargeted(ball)
+    local t = ball:GetAttribute("target")
+    if t ~= nil then return t == LocalPlayer.Name end
+    local char = LocalPlayer.Character
+    return char ~= nil and char:FindFirstChild("Highlight") ~= nil
+end
+
+-- ============================================================
+-- PARRY INPUT
+-- ============================================================
+local parryRemote = nil
+local hasKeypress = (type(keypress) == "function" and type(keyrelease) == "function")
+
+local function findParryRemote()
+    if parryRemote and parryRemote.Parent then return true end
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+    if not remotes then return false end
+    local r = remotes:FindFirstChild("ParryButtonPress")
+    if r then
+        parryRemote = r
+        return true
+    end
+    return false
+end
+
+local function parryMouse()
+    pcall(function()
+        VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+        task.wait(0.01)
+        VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+    end)
+end
+
+local function parryRemoteFire()
+    if not findParryRemote() then return end
+    pcall(function() parryRemote:Fire() end)
+end
+
+local function parryKey()
+    if not hasKeypress then
+        parryMouse()
+        return
+    end
+    pcall(function()
+        keypress(0x46)
+        task.wait(0.01)
+        keyrelease(0x46)
+    end)
+end
+
+local function doParry()
+    local m = CFG.parryMethod
+    if m == "Mouse" then
+        parryMouse()
+    elseif m == "Remote" then
+        parryRemoteFire()
+    elseif m == "Keypress" then
+        parryKey()
+    else
+        parryRemoteFire()
+        parryMouse()
+    end
+end
+
+-- ============================================================
+-- STATE
+-- ============================================================
+local currentBall, ballTargetConn, ballLocked = nil, nil, false
+local lastParryTime, lastParryBall = 0, nil
+local clashActive, clashTime = false, 0
+local targetHistory = {}
+local ballTrack = {
+    ball = nil, pos = nil, speed = 0, smooth = 0,
+    accel = 0, hasSample = false, lastImpact = 0,
+}
+
+local function resetBallTrack()
+    ballTrack.ball       = nil
+    ballTrack.pos        = nil
+    ballTrack.speed      = 0
+    ballTrack.smooth     = 0
+    ballTrack.accel      = 0
+    ballTrack.hasSample  = false
+    ballTrack.lastImpact = 0
+end
+
+local function pushTargetHistory(target)
+    if not target then return end
+    local now = os.clock()
+    for i = #targetHistory, 1, -1 do
+        if now - targetHistory[i].time > CLASH_HISTORY then
+            table.remove(targetHistory, i)
+        end
+    end
+    local last = targetHistory[#targetHistory]
+    if not last or last.target ~= target then
+        table.insert(targetHistory, { time = now, target = target })
+    end
+end
+
+local function nearbyPlayers(ball, radius)
+    local set = {}
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then
+            local char = plr.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            if root and (root.Position - ball.Position).Magnitude <= radius then
+                set[plr.Name] = true
+            end
+        end
+    end
+    return set
+end
+
+local function isClash(ball, threshold, radius)
+    if not ball then return false end
+    local near = nearbyPlayers(ball, radius)
+    if next(near) == nil then return false end
+    local count = 0
+    for _, e in ipairs(targetHistory) do
+        if e.target == LocalPlayer.Name or near[e.target] then
+            count = count + 1
+        end
+    end
+    return count >= threshold
+end
+
+local function updateClash(ball)
+    if not CFG.autoClash or not ball then
+        clashActive = false
+        return
+    end
+    local hit = isClash(ball, CFG.clashExchangeThreshold, CFG.clashDetectRadius)
+    local now = os.clock()
+    if hit then
+        clashTime   = now
+        clashActive = true
+    elseif now - clashTime > CLASH_FADE then
+        clashActive = false
+    end
+end
+
+local function getBallVelocity(ball, dt)
+    local zoom = ball:FindFirstChild("zoomies")
+    if zoom then
+        local ok, vel = pcall(function() return zoom.VectorVelocity end)
+        if ok and typeof(vel) == "Vector3" and vel.Magnitude > 0.1 then
+            return vel
+        end
+    end
+    local lin = ball.AssemblyLinearVelocity
+    if lin.Magnitude > 0.1 then return lin end
+    if ballTrack.pos and dt > 0 then
+        return (ball.Position - ballTrack.pos) / dt
+    end
+    return Vector3.zero
+end
+
+local function timeToImpact(dist, speed, accel)
+    if speed <= 0.01 then return math.huge end
+    if accel > 0.5 then
+        local disc = speed * speed + 2 * accel * dist
+        return (-speed + math.sqrt(disc)) / accel
+    end
+    return dist / speed
+end
+
+-- ============================================================
+-- CAMERA CURVE
+-- ============================================================
+local camCurve = {
+    active = false, startTime = 0, duration = CURVE_DURATION,
+    yaw = 0, pitch = 0, roll = 0, fovBoost = 0, originalFov = nil,
+}
+
+local function stopCamCurve()
+    camCurve.active   = false
+    camCurve.yaw      = 0
+    camCurve.pitch    = 0
+    camCurve.roll     = 0
+    camCurve.fovBoost = 0
+    if camCurve.originalFov then
+        local cam = Workspace.CurrentCamera
+        if cam then
+            pcall(function() cam.FieldOfView = camCurve.originalFov end)
+        end
+    end
+    camCurve.originalFov = nil
+end
+
+local function startCamCurve(mode)
+    if mode == "Off" or not mode then return end
+    local strength = CFG.curveDeflectStrength / 100
+    if strength <= 0 then return end
+    local dir = mode
+    if mode == "Random" or mode == "Camera" then
+        local opts = { "Right", "Left", "Up", "Down" }
+        dir = opts[math.random(1, 4)]
+    end
+    local yawAmt   = CURVE_YAW   * strength
+    local pitchAmt = CURVE_PITCH * strength
+    local fovAmt   = CURVE_FOV   * strength
+    local yaw, pitch, roll = 0, 0, 0
+    if dir == "Right" then
+        yaw  =  yawAmt
+        roll = -pitchAmt
+    elseif dir == "Left" then
+        yaw  = -yawAmt
+        roll =  pitchAmt
+    elseif dir == "Up" then
+        pitch = yawAmt
+    elseif dir == "Down" then
+        pitch = -yawAmt
+    else
+        return
+    end
+    camCurve.active    = true
+    camCurve.startTime = os.clock()
+    camCurve.duration  = CURVE_DURATION
+    camCurve.yaw       = yaw
+    camCurve.pitch     = pitch
+    camCurve.roll      = roll
+    camCurve.fovBoost  = fovAmt
+    local cam = Workspace.CurrentCamera
+    if cam and not camCurve.originalFov then
+        camCurve.originalFov = cam.FieldOfView
+    end
+end
+
+local function stepCamCurve()
+    if not camCurve.active then return end
+    local t = os.clock() - camCurve.startTime
+    if t >= camCurve.duration then
+        stopCamCurve()
+        return
+    end
+    local frac = t / camCurve.duration
+    local ease = (1 - frac) * (1 - frac)
+    local cam  = Workspace.CurrentCamera
+    if not cam then return end
+    pcall(function()
+        cam.CFrame = cam.CFrame * CFrame.Angles(
+            math.rad(camCurve.pitch * ease),
+            math.rad(camCurve.yaw   * ease),
+            math.rad(camCurve.roll  * ease)
+        )
+    end)
+    if camCurve.originalFov and camCurve.fovBoost ~= 0 then
+        pcall(function()
+            cam.FieldOfView = camCurve.originalFov + camCurve.fovBoost * ease
+        end)
+    end
+end
+
+pcall(function() RunService:UnbindFromRenderStep(CAMERA_BIND) end)
+pcall(function()
+    RunService:BindToRenderStep(CAMERA_BIND, Enum.RenderPriority.Camera.Value + 1, stepCamCurve)
+end)
+
+-- ============================================================
+-- ABILITY COUNTER
+-- ============================================================
+local ability = {
+    active = false, type = nil, startTime = 0, duration = 0,
+    windowMod = 1.0, lastDir = Vector3.zero, detectionCooldown = 0,
+    avgSpeed = 0, preDeflectSpeed = 0, lastDeflector = nil,
+    lastDeflectTime = 0, lastDeflectBall = nil, lastBallTarget = nil,
+    lostTargetAt = 0, lastBall = nil,
+}
+
+local function getAbility(plr)
+    if not plr then return nil end
+    for _, attr in ipairs(ABILITY_ATTRS) do
+        local ok, val = pcall(function() return plr:GetAttribute(attr) end)
+        if ok and typeof(val) == "string" and val ~= "" then return val end
+    end
+    local char = plr.Character
+    if char then
+        for _, attr in ipairs(ABILITY_ATTRS) do
+            local ok, val = pcall(function() return char:GetAttribute(attr) end)
+            if ok and typeof(val) == "string" and val ~= "" then return val end
+        end
+    end
+    return nil
+end
+
+local function isDangerAbility(name)
+    if not name then return false end
+    local lower = name:lower()
+    for _, s in ipairs(ABILITY_SAFE) do
+        if lower:find(s, 1, true) then return false end
+    end
+    for _, d in ipairs(ABILITY_DANGER) do
+        if lower:find(d, 1, true) then return true end
+    end
+    return false
+end
+
+local function recordPreDeflect(ball)
+    if not ball then return end
+    local spd = ball.AssemblyLinearVelocity.Magnitude
+    if spd > 0.1 then ability.preDeflectSpeed = spd end
+end
+
+local function detectSpike(ball)
+    if not ball then return false, 0 end
+    if ability.preDeflectSpeed <= 0.1 then return false, 0 end
+    local now   = ball.AssemblyLinearVelocity.Magnitude
+    local ratio = (now - ability.preDeflectSpeed) / ability.preDeflectSpeed
+    return ratio >= CFG.abilitySpikeThreshold, ratio
+end
+
+local function onTargetChange(oldTarget, newTarget, ball)
+    if oldTarget and oldTarget ~= LocalPlayer.Name and oldTarget ~= newTarget then
+        if ball then recordPreDeflect(ball) end
+        local plr = Players:FindFirstChild(oldTarget)
+        if plr then
+            local ab = getAbility(plr)
+            if ab and isDangerAbility(ab) then
+                ability.lastDeflector  = oldTarget
+                ability.lastDeflectTime = os.clock()
+                ability.lastDeflectBall = ball
+            else
+                ability.lastDeflector  = nil
+                ability.lastDeflectTime = 0
+            end
+        end
+    end
+end
+
+local function resetAbility()
+    ability.active          = false
+    ability.type            = nil
+    ability.startTime       = 0
+    ability.duration        = 0
+    ability.windowMod       = 1.0
+    ability.lastDir         = Vector3.zero
+    ability.detectionCooldown = 0
+    ability.avgSpeed        = 0
+    ability.preDeflectSpeed = 0
+    ability.lastDeflector   = nil
+    ability.lastDeflectTime = 0
+    ability.lastDeflectBall = nil
+    ability.lastBallTarget  = nil
+    ability.lostTargetAt    = 0
+    ability.lastBall        = nil
+end
+
+local function detectAbilityEvent(ball, dt)
+    if not ball then return nil end
+    if not ability.lastDeflector then return nil end
+    local age = os.clock() - ability.lastDeflectTime
+    if age > ABILITY_SPIKE_T then
+        ability.lastDeflector = nil
+        return nil
+    end
+    local spiked, ratio = detectSpike(ball)
+    if spiked then
+        return {
+            type     = string.format("SpeedSpike:%.0f%%:%s", ratio * 100, ability.lastDeflector),
+            mod      = 1.30,
+            duration = 0.6,
+        }
+    end
+    if ability.lastDir.Magnitude > 1 and dt > 0 then
+        local dir = ball.AssemblyLinearVelocity.Unit
+        if dir.Magnitude > 0 then
+            local dot = math.clamp(dir:Dot(ability.lastDir), -1, 1)
+            local deg = math.deg(math.acos(dot))
+            if deg > ABILITY_CURVE_D then
+                return { type = "Curve:" .. ability.lastDeflector, mod = 1.20, duration = 0.4 }
+            end
+        end
+    end
+    return nil
+end
+
+local function updateAbility(ball, dt)
+    if not CFG.abilityCounter then
+        resetAbility()
+        return
+    end
+    local now = os.clock()
+    if ball ~= ability.lastBall then
+        resetAbility()
+        ability.lastBall = ball
+    end
+    if ball then
+        local t = ball:GetAttribute("target")
+        if t ~= ability.lastBallTarget then
+            onTargetChange(ability.lastBallTarget, t, ball)
+            ability.lastBallTarget = t
+        end
+    end
+    if not ball or not isTargeted(ball) then
+        if ability.lostTargetAt == 0 then ability.lostTargetAt = now end
+        ability.active    = false
+        ability.windowMod = 1.0
+        if now - ability.lostTargetAt >= ABILITY_LOST_T then
+            resetAbility()
+        end
+        return
+    end
+    ability.lostTargetAt = 0
+    if ability.active and now - ability.startTime > ability.duration then
+        ability.active    = false
+        ability.windowMod = 1.0
+    end
+    if now - ability.detectionCooldown < 0.15 then
+        local vel = ball.AssemblyLinearVelocity
+        if vel.Magnitude > 0.1 then ability.lastDir = vel.Unit end
+        return
+    end
+    local event = detectAbilityEvent(ball, dt)
+    if event then
+        ability.active          = true
+        ability.type            = event.type
+        ability.startTime       = now
+        ability.duration        = event.duration
+        ability.windowMod       = event.mod
+        ability.detectionCooldown = now
+    end
+    local vel = ball.AssemblyLinearVelocity
+    if vel.Magnitude > 0.1 then ability.lastDir = vel.Unit end
+end
+
+local function abilityWindowMod()
+    if not CFG.abilityCounter then return 1.0 end
+    if ability.active then return ability.windowMod end
+    return 1.0
+end
+
+local function attachBall(ball)
+    if ballTargetConn then
+        ballTargetConn:Disconnect()
+        ballTargetConn = nil
+    end
+    currentBall = ball
+    ballLocked  = false
+    targetHistory = {}
+    ability.lastBall       = ball
+    ability.lastBallTarget = ball:GetAttribute("target")
+    ballTargetConn = ball:GetAttributeChangedSignal("target"):Connect(function()
+        local newT = ball:GetAttribute("target")
+        local oldT = ability.lastBallTarget
+        pushTargetHistory(newT)
+        if oldT ~= newT then
+            if oldT == LocalPlayer.Name and CFG.curveDeflectMode ~= "Off" then
+                startCamCurve(CFG.curveDeflectMode)
+            end
+            onTargetChange(oldT, newT, ball)
+            ability.lastBallTarget = newT
+        end
+        if newT == LocalPlayer.Name then
+            ballLocked = false
+        end
+    end)
+    local t = ball:GetAttribute("target")
+    if t then
+        pushTargetHistory(t)
+        ability.lastBallTarget = t
+    end
+    if isTargeted(ball) then
+        ballLocked = false
+    end
+end
+
+if BallsFolder then
+    track(BallsFolder.ChildAdded:Connect(function(child)
+        if child:IsA("BasePart") and child:GetAttribute("realBall") == true then
+            attachBall(child)
+        end
+    end))
+    local existing = getRealBall()
+    if existing then attachBall(existing) end
+end
+
+-- ============================================================
+-- UNLOCKS
+-- ============================================================
+local Unlock = {
+    initialized   = false,
+    originals     = {},
+    fakeCache     = {},
+    allSwordNames = nil,
+    swordsByRarity= nil,
+}
+local FAKE_PREFIX = "tempofake_"
+
+local function isFakeId(id)
+    return type(id) == "string" and id:sub(1, #FAKE_PREFIX) == FAKE_PREFIX
+end
+
+local function makeFakeId(itemType, name)
+    local s = tostring(name)
+    if s:sub(1, #FAKE_PREFIX) == FAKE_PREFIX then return s end
+    return FAKE_PREFIX .. tostring(itemType) .. "_" .. s
+end
+
+local function parseFakeId(id)
+    local rest = id:sub(#FAKE_PREFIX + 1)
+    local sep  = rest:find("_")
+    if not sep then return nil, nil end
+    return rest:sub(1, sep - 1), rest:sub(sep + 1)
+end
+
+local function unlockEnabled(itemType)
+    if itemType == "Sword"     then return CFG.unlockSwords end
+    if itemType == "Explosion" then return CFG.unlockExplosions end
+    if itemType == "Emote"     then return CFG.unlockEmotes end
+    if itemType == "Finisher"  then return CFG.unlockFinishers end
+    return false
+end
+
+local function fakeItem(id, itemType, name)
+    return {
+        Name      = name,
+        Id        = id,
+        ItemType  = itemType,
+        TradeLock = { Type = "Permanent", Value = true },
+    }
+end
+
+function Unlock.enumerateSwords()
+    if Unlock.allSwordNames then return Unlock.allSwordNames end
+    local list, seen = {}, {}
+    local ok, mod = pcall(function()
+        return require(ReplicatedStorage.Shared.ReplicatedInstances.Swords)
+    end)
+    if ok and mod then
+        local ok2, col = pcall(function() return mod:GetCollection() end)
+        if ok2 and col then
+            for name in pairs(col) do
+                if not seen[name] then
+                    seen[name] = true
+                    table.insert(list, name)
+                end
+            end
+        end
+    end
+    table.sort(list)
+    Unlock.allSwordNames = list
+    return list
+end
+
+function Unlock.groupSwordsByRarity()
+    if Unlock.swordsByRarity then return Unlock.swordsByRarity end
+    local groups = {}
+    for _, r in ipairs(RARITIES) do groups[r] = {} end
+    groups["Other"] = {}
+    local ok, mod = pcall(function()
+        return require(ReplicatedStorage.Shared.ReplicatedInstances.Swords)
+    end)
+    if not ok or not mod then
+        Unlock.swordsByRarity = groups
+        return groups
+    end
+    for _, name in ipairs(Unlock.enumerateSwords()) do
+        local sword = nil
+        pcall(function() sword = mod:GetSword(name) end)
+        local rarity = sword and sword.Rarity
+        if rarity and groups[rarity] then
+            table.insert(groups[rarity], name)
+        else
+            table.insert(groups["Other"], name)
+        end
+    end
+    for _, list in pairs(groups) do table.sort(list) end
+    Unlock.swordsByRarity = groups
+    return groups
+end
+
+function Unlock.getSwordsInRarity(rarity)
+    if rarity == "All" then return Unlock.enumerateSwords() end
+    local groups = Unlock.groupSwordsByRarity()
+    return groups[rarity] or {}
+end
+
+function Unlock.enumerateCosmetics(itemType)
+    local list, seen = {}, {}
+    local function add(name)
+        if type(name) == "string" and name ~= "" and not seen[name] then
+            seen[name] = true
+            table.insert(list, name)
+        end
+    end
+    local misc = ReplicatedStorage:FindFirstChild("Misc")
+    if itemType == "Sword" then
+        for _, n in ipairs(Unlock.enumerateSwords()) do add(n) end
+    elseif itemType == "Explosion" then
+        if misc then
+            local folder = misc:FindFirstChild("DataExplosions")
+            if folder then
+                for _, c in ipairs(folder:GetChildren()) do add(c.Name) end
+            end
+        end
+    elseif itemType == "Finisher" then
+        if misc then
+            local folder = misc:FindFirstChild("DataFinishers")
+            if folder then
+                for _, c in ipairs(folder:GetChildren()) do add(c.Name) end
+            end
+        end
+    elseif itemType == "Ability" then
+        if misc then
+            local folder = misc:FindFirstChild("DataAbilities")
+            if folder then
+                for _, c in ipairs(folder:GetChildren()) do add(c.Name) end
+            end
+        end
+    elseif itemType == "Emote" then
+        local ok, mod = pcall(function()
+            return require(ReplicatedStorage.Shared.ReplicatedInstances.EmoteVFX)
+        end)
+        if ok and mod then
+            local ok2, col = pcall(function() return mod:GetCollection() end)
+            if ok2 and col then
+                for n in pairs(col) do add(n) end
+            end
+        end
+    end
+    return list
+end
+
+function Unlock.buildFakeInventory(itemType)
+    if Unlock.fakeCache[itemType] then return Unlock.fakeCache[itemType] end
+    local inv = {}
+    for _, name in ipairs(Unlock.enumerateCosmetics(itemType)) do
+        local id = makeFakeId(itemType, name)
+        inv[id] = fakeItem(id, itemType, name)
+    end
+    Unlock.fakeCache[itemType] = inv
+    return inv
+end
+
+function Unlock.forceEquipSword(name)
+    if type(name) ~= "string" or name == "" then
+        return false, "Empty sword name"
+    end
+    local char = LocalPlayer.Character
+    if not char then return false, "No character (dead or loading)" end
+    local ok, mod = pcall(function()
+        return require(ReplicatedStorage.Shared.ReplicatedInstances.Swords)
+    end)
+    if not ok or not mod then return false, "Swords module load failed" end
+    local sword = nil
+    pcall(function() sword = mod:GetSword(name) end)
+    if not sword then return false, "Sword not in collection: " .. name end
+    local ok2, result = pcall(function()
+        return mod:EquipSwordTo(char, name, 1, false)
+    end)
+    if not ok2 then return false, "EquipSwordTo errored: " .. tostring(result) end
+    if typeof(result) ~= "Instance" then
+        return false, "EquipSwordTo returned " .. typeof(result)
+    end
+    pcall(function() LocalPlayer:SetAttribute("CurrentlyEquippedSword", name) end)
+    pcall(function() char:SetAttribute("CurrentlyEquippedSword", name) end)
+    return true, result
+end
+
+function Unlock.installOwnershipHooks()
+    local shared    = ReplicatedStorage:FindFirstChild("Shared")
+    local inv       = shared and shared:FindFirstChild("Inventory")
+    local sharedInv = inv and inv:FindFirstChild("Shared")
+    if not sharedInv then
+        return false, "ReplicatedStorage.Shared.Inventory.Shared not found"
+    end
+    local ok, mod = pcall(require, sharedInv)
+    if not ok or not mod then
+        return false, "Failed to require Shared.Inventory.Shared: " .. tostring(mod)
+    end
+    Unlock.shared = mod
+    Unlock.originals.OwnsItem         = mod.OwnsItem
+    Unlock.originals.GetItem          = mod.GetItem
+    Unlock.originals.FindItems        = mod.FindItems
+    Unlock.originals.FindItemsWithKey = mod.FindItemsWithKey
+
+    mod.OwnsItem = function(self, id, ...)
+        if isFakeId(id) then return true end
+        return Unlock.originals.OwnsItem(self, id, ...)
+    end
+    mod.GetItem = function(self, id, ...)
+        if isFakeId(id) then
+            local itemType, name = parseFakeId(id)
+            if itemType and name then
+                return fakeItem(id, itemType, name)
+            end
+        end
+        return Unlock.originals.GetItem(self, id, ...)
+    end
+    mod.FindItems = function(self, itemType, ...)
+        local real = Unlock.originals.FindItems(self, itemType, ...)
+        if not unlockEnabled(itemType) then return real end
+        local fake = Unlock.buildFakeInventory(itemType)
+        local merged = {}
+        if type(real) == "table" then
+            for k, v in pairs(real) do merged[k] = v end
+        end
+        for k, v in pairs(fake) do merged[k] = v end
+        return merged
+    end
+    mod.FindItemsWithKey = function(self, itemType, key, ...)
+        local real = Unlock.originals.FindItemsWithKey(self, itemType, key, ...)
+        if not unlockEnabled(itemType) then return real end
+        local fake = Unlock.buildFakeInventory(itemType)
+        local merged = {}
+        if type(real) == "table" then
+            for k, v in pairs(real) do merged[k] = v end
+        end
+        for k, v in pairs(fake) do merged[k] = v end
+        return merged
+    end
+    Unlock.initialized = true
+    return true, "Hooks installed"
+end
+
+function Unlock.init(force)
+    if Unlock.initialized and not force then
+        return true, "Already initialized"
+    end
+    return Unlock.installOwnershipHooks()
+end
+
+local function saveLastSword(name)
+    CFG.lastEquippedSword = name
+    writeFS(FS.filePath, name)
+end
+
+local reequipConn = nil
+local function startAutoReequip()
+    if reequipConn then return end
+    reequipConn = LocalPlayer.CharacterAdded:Connect(function()
+        task.wait(1.2)
+        if CFG.autoReequip and CFG.lastEquippedSword and CFG.lastEquippedSword ~= "Base Sword" then
+            Unlock.forceEquipSword(CFG.lastEquippedSword)
+        end
+    end)
+    track(reequipConn)
+end
+
+local function stopAutoReequip()
+    if reequipConn then
+        pcall(function() reequipConn:Disconnect() end)
+        reequipConn = nil
+    end
+end
+
+-- ============================================================
+-- ANTI AFK / FPS BOOST
+-- ============================================================
+local antiAfkConn = nil
+local function startAntiAfk()
+    if antiAfkConn then return end
+    antiAfkConn = LocalPlayer.Idled:Connect(function()
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new())
+    end)
+    track(antiAfkConn)
+end
+
+local function stopAntiAfk()
+    if antiAfkConn then
+        pcall(function() antiAfkConn:Disconnect() end)
+        antiAfkConn = nil
+    end
+end
+
+local fpsBoostOriginals = {}
+local function applyFpsBoost()
+    pcall(function()
+        local s = settings()
+        fpsBoostOriginals.QualityLevel = s.Rendering.QualityLevel
+        s.Rendering.QualityLevel = Enum.QualityLevel.Level01
+    end)
+    pcall(function()
+        Lighting.GlobalShadows = false
+        Lighting.FogEnd = 9e9
+        Lighting.Brightness = 1
+    end)
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        if v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Beam") then
+            v.Enabled = false
+        end
+    end
+end
+
+local function restoreFpsBoost()
+    pcall(function()
+        if fpsBoostOriginals.QualityLevel then
+            settings().Rendering.QualityLevel = fpsBoostOriginals.QualityLevel
+        end
+    end)
+end
+
+-- ============================================================
+-- VISUALS
+-- ============================================================
+local orbParts = {}
+local function destroyOrb()
+    for _, p in ipairs(orbParts) do
+        pcall(function() p:Destroy() end)
+    end
+    orbParts = {}
+end
+
+local function createOrb()
+    destroyOrb()
+    local ball = getRealBall()
+    if not ball then return end
+    local part = Instance.new("Part")
+    part.Name         = "TempoHubOrb"
+    part.Shape        = Enum.PartType.Ball
+    part.Size         = Vector3.new(1.4, 1.4, 1.4)
+    part.Material     = Enum.Material.Neon
+    part.Color        = Color3.fromRGB(46, 155, 255)
+    part.Anchored     = true
+    part.CanCollide   = false
+    part.CastShadow   = false
+    part.Parent       = Workspace
+    table.insert(orbParts, part)
+    return part
+end
+
+local overheadGui = nil
+local function destroyOverhead()
+    if overheadGui then
+        pcall(function() overheadGui:Destroy() end)
+        overheadGui = nil
+    end
+end
+
+local function ensureOverhead()
+    if overheadGui and overheadGui.Parent then return overheadGui end
+    destroyOverhead()
+    local char = LocalPlayer.Character
+    local head = char and char:FindFirstChild("Head")
+    if not head then return nil end
+    local bb = Instance.new("BillboardGui")
+    bb.Name          = "TempoHubStats"
+    bb.Adornee       = head
+    bb.Size          = UDim2.fromOffset(200, 50)
+    bb.StudsOffset   = Vector3.new(0, 3, 0)
+    bb.AlwaysOnTop   = true
+    bb.Parent        = head
+    local label = Instance.new("TextLabel")
+    label.Name                   = "Impact"
+    label.BackgroundTransparency = 1
+    label.Size                   = UDim2.fromScale(1, 1)
+    label.Font                   = Enum.Font.GothamBold
+    label.TextSize               = 16
+    label.TextColor3             = Color3.fromRGB(46, 155, 255)
+    label.TextStrokeTransparency = 0.4
+    label.Text                   = ""
+    label.Parent                 = bb
+    overheadGui = bb
+    return bb
+end
+
+-- ============================================================
+-- PRESENCE
+-- ============================================================
+local Presence = {
+    enabled           = false,
+    billboardsEnabled = true,
+    known             = {},
+    leftUsers         = {},
+    replyCooldowns    = {},
+    lastOutboundReply = 0,
+    conns             = {},
+    chatHooked        = false,
+    playerWatchConns  = {},
+    seenMessages      = {},
+    billboardAnimConn = nil,
+}
+
+local TIER_TABLE = {
+    -- [UserId] = "C" / "A" / "M" / "T"
+    [7295943857] = "C",
+}
+
+local TIERS = {
+    ["C"] = {
+        name = "TH CREATOR",
+        color = Color3.fromRGB(255, 215, 0),
+        rank = 5,
+        textSize = 30,
+        gradient = true,
+        pulse = { speed = 3, min = 28, max = 32 },
+        glowBox = { enabled = true, transparencyMin = 0.35, transparencyMax = 0.55, strokeTransparency = 0.1 },
+        particles = {
+            texture = "rbxasset://textures/particles/sparkles_main.dds",
+            color = Color3.fromRGB(255, 215, 0),
+            rate = 25, lifetime = 2.5, speed = 4,
+            size = NumberSequence.new(0.6), spread = 60,
+        },
+    },
+    ["A"] = {
+        name = "TH ADMIN",
+        color = Color3.fromRGB(255, 60, 60),
+        rank = 4,
+        textSize = 28,
+        gradient = false,
+        pulse = { speed = 2.5, min = 26, max = 29 },
+        glowBox = { enabled = true, transparencyMin = 0.45, transparencyMax = 0.65, strokeTransparency = 0.2 },
+        particles = {
+            texture = "rbxasset://textures/particles/sparkles_main.dds",
+            color = Color3.fromRGB(255, 60, 60),
+            rate = 15, lifetime = 2, speed = 3,
+            size = NumberSequence.new(0.5), spread = 45,
+        },
+    },
+    ["M"] = {
+        name = "TH MOD",
+        color = Color3.fromRGB(180, 120, 255),
+        rank = 3,
+        textSize = 26,
+        gradient = false,
+        pulse = { speed = 2, min = 24, max = 27 },
+        glowBox = { enabled = true, transparencyMin = 0.55, transparencyMax = 0.75, strokeTransparency = 0.3 },
+        particles = {
+            texture = "rbxasset://textures/particles/sparkles_main.dds",
+            color = Color3.fromRGB(180, 120, 255),
+            rate = 10, lifetime = 1.8, speed = 2.5,
+            size = NumberSequence.new(0.4), spread = 40,
+        },
+    },
+    ["T"] = {
+        name = "TH TESTER",
+        color = Color3.fromRGB(80, 220, 100),
+        rank = 2,
+        textSize = 25,
+        gradient = false,
+        pulse = { speed = 1.5, min = 23, max = 25 },
+        glowBox = { enabled = false },
+        particles = {
+            texture = "rbxasset://textures/particles/sparkles_main.dds",
+            color = Color3.fromRGB(80, 220, 100),
+            rate = 5, lifetime = 1.4, speed = 1.8,
+            size = NumberSequence.new(0.3), spread = 30,
+        },
+    },
+    ["U"] = {
+        name = "TH USER",
+        color = Color3.fromRGB(190, 190, 190),
+        rank = 1,
+        textSize = 24,
+        gradient = false,
+        pulse = nil,
+        glowBox = { enabled = false },
+        particles = nil,
+    },
+}
+
+local function getLocalTier()
+    local id = LocalPlayer.UserId
+    return TIER_TABLE[id] or "U"
+end
+
+local function getTierData(key)
+    return TIERS[key] or TIERS["U"]
+end
+
+local function clearBillboard(plr)
+    if not plr or not plr.Character then return end
+    local head = plr.Character:FindFirstChild("Head")
+    if not head then return end
+    local existing = head:FindFirstChild("TempoHubPresence")
+    if existing then pcall(function() existing:Destroy() end) end
+    local parts = head:FindFirstChild("TempoHubParticles")
+    if parts then pcall(function() parts:Destroy() end) end
+end
+
+local function makeBillboard(plr, tierKey)
+    if not Presence.billboardsEnabled then return end
+    if not plr or not plr.Character then return end
+    local head = plr.Character:FindFirstChild("Head")
+    if not head then return end
+    clearBillboard(plr)
+    local data = getTierData(tierKey)
+    local bb = Instance.new("BillboardGui")
+    bb.Name        = "TempoHubPresence"
+    bb.Adornee     = head
+    bb.Size        = UDim2.fromOffset(220, 60)
+    bb.StudsOffset = Vector3.new(0, 3.2, 0)
+    bb.AlwaysOnTop = true
+    bb.Parent      = head
+
+    local tierLabel = Instance.new("TextLabel")
+    tierLabel.Name                   = "TierLabel"
+    tierLabel.BackgroundTransparency = 1
+    tierLabel.Size                   = UDim2.new(1, 0, 0.55, 0)
+    tierLabel.Font                   = Enum.Font.GothamBold
+    tierLabel.TextSize               = data.textSize
+    tierLabel.TextColor3             = data.color
+    tierLabel.TextStrokeTransparency = 0.3
+    tierLabel.Text                   = data.name
+    tierLabel.Parent                 = bb
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Name                   = "NameLabel"
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Size                   = UDim2.new(1, 0, 0.45, 0)
+    nameLabel.Position               = UDim2.new(0, 0, 0.55, 0)
+    nameLabel.Font                   = Enum.Font.Gotham
+    nameLabel.TextSize               = 14
+    nameLabel.TextColor3             = Color3.fromRGB(220, 220, 220)
+    nameLabel.TextStrokeTransparency = 0.5
+    nameLabel.Text                   = plr.Name
+    nameLabel.Parent                 = bb
+
+    if data.particles then
+        local att = Instance.new("Attachment")
+        att.Name   = "TempoHubParticles"
+        att.Parent = head
+        local pe = Instance.new("ParticleEmitter")
+        pe.Texture   = data.particles.texture
+        pe.Color     = ColorSequence.new(data.particles.color)
+        pe.Rate      = data.particles.rate
+        pe.Lifetime = NumberRange.new(data.particles.lifetime * 0.7, data.particles.lifetime)
+        pe.Speed     = NumberRange.new(data.particles.speed * 0.5, data.particles.speed)
+        pe.Size      = data.particles.size
+        pe.SpreadAngle = Vector2.new(data.particles.spread, data.particles.spread)
+        pe.Parent    = att
+    end
+
+    Presence.known[plr.Name] = {
+        tier     = tierKey,
+        tierName = data.name,
+        rank     = data.rank,
+        gui      = bb,
+        tierLabel= tierLabel,
+        nameLabel= nameLabel,
+        data     = data,
+    }
+end
+
+local function startBillboardAnim()
+    if Presence.billboardAnimConn then return end
+    Presence.billboardAnimConn = RunService.Heartbeat:Connect(function()
+        local t = os.clock()
+        for _, entry in pairs(Presence.known) do
+            if entry.data and entry.data.pulse and entry.tierLabel and entry.tierLabel.Parent then
+                local p = entry.data.pulse
+                local wave = (math.sin(t * p.speed) + 1) / 2
+                entry.tierLabel.TextSize = p.min + (p.max - p.min) * wave
+            end
+        end
+    end)
+    track(Presence.billboardAnimConn)
+end
+
+local function stopBillboardAnim()
+    if Presence.billboardAnimConn then
+        pcall(function() Presence.billboardAnimConn:Disconnect() end)
+        Presence.billboardAnimConn = nil
+    end
+end
+
+local function broadcastPresence()
+    -- Presence is visual + local detection only in this port.
+    -- Network presence can be extended later with a remote or chat tag.
+end
+
+local function stopPresence()
+    Presence.enabled = false
+    stopBillboardAnim()
+    for name, _ in pairs(Presence.known) do
+        local plr = Players:FindFirstChild(name)
+        if plr then clearBillboard(plr) end
+    end
+    Presence.known = {}
+end
+
+-- ============================================================
+-- MAIN PARRY LOOP
+-- ============================================================
+local mainConn = nil
+
+local function calcWindow(speed, ping, fps)
+    local base = CFG.windowBase
+    local maxW = CFG.windowMax
+    local minW = CFG.windowMin
+    local speedFac = CFG.windowSpeedFac
+    local pingFac  = CFG.windowPingFac
+
+    if CFG.autoWindow then
+        for _, tier in ipairs(PING_TIERS) do
+            if ping * 1000 <= tier.maxPing then
+                base     = tier.base
+                speedFac = tier.speedFac
+                maxW     = tier.max
+                minW     = tier.min
+                pingFac  = tier.pingFac
+                break
+            end
+        end
+    end
+
+    local window = base + speed * speedFac
+    if CFG.useAutoPing then
+        window = window + ping * pingFac
+    end
+    window = window + fpsComp(fps)
+    window = window * abilityWindowMod()
+    if CFG.useDynamicWindow then
+        window = window * CFG.simpleRatio
+    end
+    return math.clamp(window, minW, maxW)
+end
+
+local function shouldParry(ball, dt)
+    if not ball or not isTargeted(ball) then return false end
+    local root = getRoot()
+    if not root then return false end
+
+    local pos  = ball.Position
+    local vel  = getBallVelocity(ball, dt)
+    local speed= vel.Magnitude
+    local dist = (pos - root.Position).Magnitude
+
+    if dist > CFG.maxParryDistance then return false end
+
+    if CFG.maxParryAngle < 180 and speed > 1 then
+        local toPlayer = (root.Position - pos).Unit
+        local dir = vel.Unit
+        local ang = math.deg(math.acos(math.clamp(dir:Dot(toPlayer), -1, 1)))
+        if ang > CFG.maxParryAngle then return false end
+    end
+
+    local now = os.clock()
+    if ball == lastParryBall and now - lastParryTime < CFG.sameBallLockout then
+        return false
+    end
+
+    local accel = 0
+    if ballTrack.hasSample and ballTrack.ball == ball then
+        accel = (speed - ballTrack.speed) / math.max(dt, 0.001)
+    end
+
+    local tti = timeToImpact(dist, speed, accel)
+    local ping = getPing()
+    local fps  = getFps()
+    local window = calcWindow(speed, ping, fps)
+
+    if CFG.curvePrediction and speed > 5 then
+        -- slight early bias on high speed
+        window = window * 1.05
+    end
+
+    if clashActive and CFG.clashPriority then
+        local spam = CLASH_MODES[CFG.clashSpamMode] or 0.15
+        if now - lastParryTime >= spam then
+            return true
+        end
+    end
+
+    return tti <= window
+end
+
+local function mainLoop(dt)
+    updateFps(dt)
+    if CFG.autoFps then
+        autoFpsTier(FPS.smoothed)
+    end
+
+    local ball = getRealBall()
+    if ball and ball ~= currentBall then
+        attachBall(ball)
+    end
+
+    if ball then
+        local vel = getBallVelocity(ball, dt)
+        local speed = vel.Magnitude
+        if ballTrack.ball == ball and ballTrack.hasSample then
+            ballTrack.accel = (speed - ballTrack.speed) / math.max(dt, 0.001)
+        end
+        ballTrack.ball      = ball
+        ballTrack.pos       = ball.Position
+        ballTrack.speed     = speed
+        ballTrack.smooth    = ballTrack.smooth + (speed - ballTrack.smooth) * 0.25
+        ballTrack.hasSample = true
+
+        updateClash(ball)
+        updateAbility(ball, dt)
+
+        if CFG.autoParry and shouldParry(ball, dt) then
+            local accuracy = CFG.parryAccuracy
+            if accuracy >= 100 or math.random(1, 100) <= accuracy then
+                doParry()
+                lastParryTime = os.clock()
+                lastParryBall = ball
+                ballLocked    = true
+            end
+        end
+
+        -- Orb
+        if CFG.orbOn then
+            if #orbParts == 0 then createOrb() end
+            if orbParts[1] then
+                orbParts[1].Position = ball.Position
+            end
+        else
+            destroyOrb()
+        end
+
+        -- Overhead
+        if CFG.showImpactTime then
+            local gui = ensureOverhead()
+            if gui then
+                local root = getRoot()
+                if root then
+                    local dist = (ball.Position - root.Position).Magnitude
+                    local tti  = timeToImpact(dist, ballTrack.smooth, ballTrack.accel)
+                    local label = gui:FindFirstChild("Impact")
+                    if label then
+                        if tti < 10 then
+                            label.Text = string.format("%.0f ms", tti * 1000)
+                        else
+                            label.Text = ""
+                        end
+                    end
+                end
+            end
+        else
+            destroyOverhead()
+        end
+    else
+        destroyOrb()
+        destroyOverhead()
+        resetBallTrack()
+    end
+
+    -- Movement
+    local hum = getHumanoid()
+    if hum then
+        if CFG.walkEnabled then
+            hum.WalkSpeed = CFG.walkSpeed
+        end
+        if CFG.jumpEnabled then
+            hum.JumpPower = CFG.jumpPower
+            hum.UseJumpPower = true
+        end
+    end
+end
+
+local function startMainLoop()
+    if mainConn then return end
+    mainConn = RunService.RenderStepped:Connect(mainLoop)
+    track(mainConn)
+end
+
+local function stopMainLoop()
+    if mainConn then
+        pcall(function() mainConn:Disconnect() end)
+        mainConn = nil
+    end
+end
+
+local function refreshLoops()
+    if CFG.autoParry or CFG.orbOn or CFG.showImpactTime or CFG.walkEnabled or CFG.jumpEnabled or CFG.autoClash or CFG.abilityCounter then
+        startMainLoop()
+    else
+        -- keep loop light if nothing needs it, but still update fps for auto window
+        if not mainConn then startMainLoop() end
+    end
+end
+
+-- ============================================================
+-- UI — TEMPO TABS (same names as LexBlade)
+-- ============================================================
+local TabParry    = UI:Tab("Auto Parry", "swords")
+local TabVisuals  = UI:Tab("Visuals", "eye")
+local TabSocial   = UI:Tab("Social", "users")
+local TabUnlocks  = UI:Tab("Unlocks", "lock-open")
+local TabMovement = UI:Tab("Movement", "footprints")
+local TabMisc     = UI:Tab("Misc", "settings")
+
+-- -------------------- AUTO PARRY --------------------
+TabParry:Section("Auto Parry")
+TabParry:Toggle("Auto Parry", false, function(v)
+    CFG.autoParry = v
+    if v then
+        local b = getRealBall()
+        if b then attachBall(b) end
+    else
+        ballLocked = false
+    end
+    refreshLoops()
+end)
+
+TabParry:Dropdown("Parry Method", { "Dual", "Mouse", "Remote", "Keypress" }, "Dual", function(v)
+    CFG.parryMethod = v
+end)
+
+TabParry:Slider("Parry Accuracy (%)", 0, 100, 100, function(v)
+    CFG.parryAccuracy = v
+end, "%")
+
+TabParry:Section("Timing Window")
+TabParry:Toggle("Auto-Window", false, function(v)
+    CFG.autoWindow = v
+end)
+
+TabParry:Toggle("Dynamic Window", true, function(v)
+    CFG.useDynamicWindow = v
+end)
+
+TabParry:Slider("Simple Ratio", 0.2, 1.0, 0.55, function(v)
+    CFG.simpleRatio = v
+end)
+
+TabParry:Slider("Window Base (s)", 0.1, 0.6, 0.32, function(v)
+    CFG.windowBase = v
+end, " s")
+
+TabParry:Slider("Window Speed Factor", 0.0, 0.002, 0.00050, function(v)
+    CFG.windowSpeedFac = v
+end)
+
+TabParry:Slider("Window Max (s)", 0.2, 0.8, 0.45, function(v)
+    CFG.windowMax = v
+end, " s")
+
+TabParry:Slider("Window Min (s)", 0.05, 0.4, 0.16, function(v)
+    CFG.windowMin = v
+end, " s")
+
+TabParry:Toggle("Add Ping To Window", true, function(v)
+    CFG.useAutoPing = v
+end)
+
+TabParry:Section("FPS Sorter")
+TabParry:Toggle("Auto-FPS", false, function(v)
+    CFG.autoFps = v
+    if v then autoFpsTier(FPS.smoothed) end
+end)
+
+TabParry:Toggle("FPS Comp", true, function(v)
+    CFG.useFpsComp = v
+end)
+
+TabParry:Toggle("Fast Spike Response", true, function(v)
+    CFG.fastSpikeResponse = v
+end)
+
+TabParry:Slider("FPS Comp Factor", 0.0, 0.10, 0.03, function(v)
+    CFG.fpsCompFactor = v
+end)
+
+TabParry:Slider("FPS Comp Max Cap (s)", 0.02, 0.30, 0.12, function(v)
+    CFG.fpsCompMax = v
+end, " s")
+
+TabParry:Slider("FPS Override", 0, 360, 0, function(v)
+    CFG.fpsOverride = v
+end)
+
+TabParry:Section("Camera Curve Effect")
+TabParry:Dropdown("Curve Effect", { "Off", "Right", "Left", "Up", "Down", "Random", "Camera" }, "Off", function(v)
+    CFG.curveDeflectMode = v
+    if v == "Off" then stopCamCurve() end
+end)
+
+TabParry:Slider("Camera Effect Strength (%)", 0, 100, 35, function(v)
+    CFG.curveDeflectStrength = v
+end, "%")
+
+TabParry:Button("Test Camera Effect", false, function()
+    if CFG.curveDeflectMode == "Off" then
+        notify("Camera Curve", "Select a mode first")
+        return
+    end
+    startCamCurve(CFG.curveDeflectMode)
+end)
+
+TabParry:Section("Clash Settings")
+TabParry:Toggle("Auto Clash", false, function(v)
+    CFG.autoClash = v
+    if not v then
+        clashActive = false
+        targetHistory = {}
+    end
+    refreshLoops()
+end)
+
+TabParry:Toggle("Auto-Configure Clash", false, function(v)
+    CFG.autoClashConfig = v
+end)
+
+TabParry:Slider("Clash Detection Radius (studs)", 10, 40, 20, function(v)
+    CFG.clashDetectRadius = v
+end, " studs")
+
+TabParry:Slider("Exchange Threshold", 2, 8, 3, function(v)
+    CFG.clashExchangeThreshold = v
+end)
+
+TabParry:Dropdown("Clash Spam Speed", { "Legit", "Pro", "Master", "Machine" }, "Pro", function(v)
+    CFG.clashSpamMode = v
+end)
+
+TabParry:Toggle("Clash Priority", true, function(v)
+    CFG.clashPriority = v
+end)
+
+TabParry:Section("Ability Counter")
+TabParry:Toggle("Ability Counter", false, function(v)
+    CFG.abilityCounter = v
+    if not v then resetAbility() end
+    refreshLoops()
+end)
+
+TabParry:Slider("Speed Spike Threshold (%)", 20, 100, 50, function(v)
+    CFG.abilitySpikeThreshold = v / 100
+end, "%")
+
+TabParry:Section("Filters")
+TabParry:Slider("Max Parry Distance (studs)", 0, 200, 100, function(v)
+    CFG.maxParryDistance = v
+end, " studs")
+
+TabParry:Slider("Max Parry Angle (degrees)", 30, 180, 180, function(v)
+    CFG.maxParryAngle = v
+end, "°")
+
+TabParry:Slider("Same-Ball Lockout (ms)", 0, 300, 80, function(v)
+    CFG.sameBallLockout = v / 1000
+end, " ms")
+
+TabParry:Toggle("Curve Prediction", true, function(v)
+    CFG.curvePrediction = v
+end)
+
+-- -------------------- VISUALS --------------------
+TabVisuals:Section("Visuals")
+TabVisuals:Toggle("Parry Orb", false, function(v)
+    CFG.orbOn = v
+    if v then
+        createOrb()
+    else
+        destroyOrb()
+    end
+    refreshLoops()
+end)
+
+TabVisuals:Toggle("Overhead Stats", true, function(v)
+    CFG.showImpactTime = v
+    if not v then destroyOverhead() end
+    refreshLoops()
+end)
+
+-- -------------------- SOCIAL --------------------
+TabSocial:Section("Presence")
+TabSocial:Label("When enabled, other TempoHub users in the same server can be detected and their tier is shown above their head.")
+
+TabSocial:Toggle("Broadcast Presence", false, function(v)
+    Presence.enabled = v
+    CFG.presenceEnabled = v
+    if v then
+        startBillboardAnim()
+        broadcastPresence()
+        notify("Presence", "Enabled. Broadcasting as " .. getTierData(getLocalTier()).name .. ".")
+    else
+        stopPresence()
+        notify("Presence", "Disabled.")
+    end
+end)
+
+TabSocial:Toggle("Show Billboard Above Head", true, function(v)
+    Presence.billboardsEnabled = v
+    CFG.billboardEnabled = v
+    if v then
+        for name, entry in pairs(Presence.known) do
+            local plr = Players:FindFirstChild(name)
+            if plr then makeBillboard(plr, entry.tier) end
+        end
+    else
+        for name, _ in pairs(Presence.known) do
+            local plr = Players:FindFirstChild(name)
+            if plr then clearBillboard(plr) end
+        end
+    end
+end)
+
+TabSocial:Section("Detected Users")
+local detectedLabel = TabSocial:Label("No users detected.")
+task.spawn(function()
+    while task.wait(2) do
+        local list = {}
+        for name, data in pairs(Presence.known) do
+            table.insert(list, { name = name, data = data })
+        end
+        table.sort(list, function(a, b)
+            if a.data.rank ~= b.data.rank then return a.data.rank > b.data.rank end
+            return a.name:lower() < b.name:lower()
+        end)
+        local lines = {}
+        for _, e in ipairs(list) do
+            table.insert(lines, e.name .. "  ·  " .. e.data.tierName)
+        end
+        local text = (#lines == 0) and "No users detected." or table.concat(lines, "\n")
+        pcall(function()
+            if detectedLabel and detectedLabel.Set then
+                detectedLabel:Set(text)
+            elseif detectedLabel then
+                detectedLabel.Text = text
+            end
+        end)
+    end
+end)
+
+-- -------------------- UNLOCKS --------------------
+TabUnlocks:Section("Locker Visibility")
+TabUnlocks:Label("Every unowned cosmetic becomes unlocked for you. It will appear within your locker.")
+
+TabUnlocks:Toggle("Unlock All Swords", false, function(v)
+    CFG.unlockSwords = v
+end)
+
+TabUnlocks:Toggle("Unlock All Explosions", false, function(v)
+    CFG.unlockExplosions = v
+end)
+
+TabUnlocks:Button("Apply Items", true, function()
+    local ok, msg = Unlock.init(true)
+    if ok then
+        notify("Unlocks", tostring(msg))
+    else
+        notify("Unlocks", "Failed: " .. tostring(msg))
+    end
+end)
+
+TabUnlocks:Section("Force Equip Sword")
+TabUnlocks:Label("Search by rarity or name, then equip. Works on most executors.")
+
+local unlockState = {
+    rarity     = "Secret",
+    searchText = "",
+    sword      = nil,
+}
+
+local rarityDropdown, swordDropdown
+
+local function refreshSwordList()
+    local source = Unlock.getSwordsInRarity(unlockState.rarity)
+    local filtered
+    if unlockState.searchText and unlockState.searchText ~= "" then
+        local q = unlockState.searchText:lower()
+        filtered = {}
+        for _, n in ipairs(source) do
+            if n:lower():find(q, 1, true) then
+                table.insert(filtered, n)
+            end
+        end
+    else
+        filtered = source
+    end
+    if #filtered == 0 then
+        unlockState.sword = "(no swords match)"
+        if swordDropdown and swordDropdown.SetItems then
+            pcall(function() swordDropdown:SetItems({ "(no swords match)" }) end)
+        end
+        return
+    end
+    local display
+    if #filtered > DROPDOWN_CAP then
+        display = {}
+        for i = 1, DROPDOWN_CAP do display[i] = filtered[i] end
+        display[#display + 1] = string.format("(+ %d more — type more in Search)", #filtered - DROPDOWN_CAP)
+    else
+        display = filtered
+    end
+    unlockState.sword = display[1]
+    if swordDropdown and swordDropdown.SetItems then
+        pcall(function() swordDropdown:SetItems(display, display[1]) end)
+    elseif swordDropdown and swordDropdown.Refresh then
+        pcall(function() swordDropdown:Refresh(display) end)
+    end
+end
+
+rarityDropdown = TabUnlocks:Dropdown("Rarity Filter", {
+    "Secret", "Unique", "Limited", "LimitedU",
+    "Legendary", "Rare", "Duo", "Normal", "All",
+}, "Secret", function(v)
+    unlockState.rarity = v
+    refreshSwordList()
+end)
+
+TabUnlocks:Input("Search Swords", 40, function(txt)
+    unlockState.searchText = txt or ""
+    refreshSwordList()
+end)
+
+swordDropdown = TabUnlocks:Dropdown("Sword", { "Loading..." }, "Loading...", function(v)
+    unlockState.sword = v
+end)
+
+TabUnlocks:Button("Equip Selected Sword", true, function()
+    local name = unlockState.sword
+    if not name or name == "Loading..." or name:sub(1, 1) == "(" then
+        notify("Force Equip", "Pick a sword first")
+        return
+    end
+    local ok, result = Unlock.forceEquipSword(name)
+    if ok then
+        saveLastSword(name)
+        notify("Force Equip", "Equipped: " .. name)
+    else
+        notify("Force Equip", "Failed: " .. tostring(result))
+    end
+end)
+
+TabUnlocks:Toggle("Auto Re-equip on Respawn", false, function(v)
+    CFG.autoReequip = v
+    if v then
+        startAutoReequip()
+        notify("Auto Re-equip", "Enabled.")
+    else
+        stopAutoReequip()
+        notify("Auto Re-equip", "Disabled.")
+    end
+end)
+
+TabUnlocks:Button("Clear Local Override", false, function()
+    local char = LocalPlayer.Character
+    if not char then return end
+    for _, c in ipairs(char:GetChildren()) do
+        if c:GetAttribute("_equippedSword") then
+            c:Destroy()
+        end
+    end
+    CFG.lastEquippedSword = "Base Sword"
+    writeFS(FS.filePath, "")
+    notify("Force Equip", "Local override cleared.")
+end)
+
+TabUnlocks:Section("Info")
+TabUnlocks:Label("Explosions cannot be force-equipped client-side — the server broadcasts the equipped explosion on kill.")
+TabUnlocks:Label("Some low-level executors need Force Equip because they do not intercept the locker equip call.")
+
+-- async sword load
+task.spawn(function()
+    local ok, err = pcall(function()
+        Unlock.enumerateSwords()
+        Unlock.groupSwordsByRarity()
+        refreshSwordList()
+    end)
+    if not ok then
+        warn("[TempoHub] Unlocks async failed: " .. tostring(err))
+    end
+end)
+
+-- -------------------- MOVEMENT --------------------
+TabMovement:Section("Movement")
+TabMovement:Toggle("Custom Walk Speed", false, function(v)
+    CFG.walkEnabled = v
+    refreshLoops()
+end)
+
+TabMovement:Slider("Walk Speed", 16, 200, 24, function(v)
+    CFG.walkSpeed = v
+end)
+
+TabMovement:Toggle("Custom Jump Power", false, function(v)
+    CFG.jumpEnabled = v
+    refreshLoops()
+end)
+
+TabMovement:Slider("Jump Power", 50, 300, 60, function(v)
+    CFG.jumpPower = v
+end)
+
+TabMovement:Toggle("Infinite Jump", false, function(v)
+    CFG.infJump = v
+end)
+
+track(UserInputService.JumpRequest:Connect(function()
+    if CFG.infJump then
+        local hum = getHumanoid()
+        if hum then
+            hum:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    end
+end))
+
+-- -------------------- MISC --------------------
+TabMisc:Section("Utility")
+TabMisc:Toggle("Anti AFK", false, function(v)
+    CFG.antiAfk = v
+    if v then startAntiAfk() else stopAntiAfk() end
+end)
+
+TabMisc:Toggle("FPS Boost", false, function(v)
+    CFG.fpsBoost = v
+    if v then applyFpsBoost() else restoreFpsBoost() end
+end)
+
+TabMisc:Section("Server")
+TabMisc:Button("Rejoin Server", false, function()
+    pcall(function()
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+    end)
+end)
+
+TabMisc:Button("Unload Script", true, function()
+    if Presence.enabled then
+        pcall(stopPresence)
+        task.wait(0.2)
+    end
+    stopMainLoop()
+    disconnectAll()
+    destroyOrb()
+    destroyOverhead()
+    stopCamCurve()
+    stopAutoReequip()
+    stopAntiAfk()
+    restoreFpsBoost()
+    pcall(function() RunService:UnbindFromRenderStep(CAMERA_BIND) end)
+    pcall(function()
+        if UI and UI.Destroy then UI:Destroy() end
+    end)
+    env.__TEMPOHUB_LOADED = false
+    print("[TempoHub] Script unloaded.")
+end)
+
+-- ============================================================
+-- CLEANUP + BOOT
+-- ============================================================
+env.__TEMPOHUB_CLEANUP = function()
+    env.__TEMPOHUB_LOADED = false
+    if Presence.enabled then pcall(stopPresence) end
+    stopMainLoop()
+    disconnectAll()
+    destroyOrb()
+    destroyOverhead()
+    stopCamCurve()
+    stopAutoReequip()
+    stopAntiAfk()
+    restoreFpsBoost()
+    pcall(function() RunService:UnbindFromRenderStep(CAMERA_BIND) end)
+    pcall(function()
+        if UI and UI.Destroy then UI:Destroy() end
+    end)
+end
+
+if next(TIER_TABLE) == nil then
+    warn("[TempoHub] TIER_TABLE is empty: every user will show as TH USER. Add UserIds to enable higher tiers.")
+end
+
+if not hasKeypress then
+    task.spawn(function()
+        task.wait(3)
+        notify("Auto Parry", "Keypress not supported. Mouse and Remote will work.")
+    end)
+end
+
+if not FS.available then
+    task.spawn(function()
+        task.wait(3.5)
+        notify("Persistence", "Filesystem API unavailable. Last sword will not persist across sessions.")
+    end)
+end
+
+-- start light loop so fps / window stay live
+startMainLoop()
+
+UI:Boot({ "checking executor", "building interface", "ready" }, function()
+    UI:Notify("TempoHub loaded — " .. VERSION, "good")
+end)
